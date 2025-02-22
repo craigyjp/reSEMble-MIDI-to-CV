@@ -340,9 +340,20 @@ void displayMenu() {
 
   for (int i = 0; i < visibleItems && (startItem + i) < MENU_TOTAL_ITEMS; i++) {
     int menuIndex = startItem + i;
+
+    // Highlight logic
     if (menuIndex == currentMenu) {
-      display.print("> ");
+      if (editing) {
+        // Highlight the parameter being edited (inverse colors)
+        display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);  // Inverse
+        display.print("> ");
+      } else {
+        // Normal selection indicator
+        display.setTextColor(SSD1306_WHITE);
+        display.print("> ");
+      }
     } else {
+      display.setTextColor(SSD1306_WHITE);
       display.print("  ");
     }
 
@@ -480,6 +491,10 @@ void displayMenu() {
         display.println(masterChan);
         break;
     }
+
+    // Reset text color for the next line
+    display.setTextColor(SSD1306_WHITE);
+
   }
 
   display.display();
