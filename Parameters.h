@@ -26,9 +26,10 @@ int GLIDE_TIME = 0;      // 0-127
 bool POLYMODE = false;   // Off/On
 
 // Glide
-bool portamentoOn = false;        // Portamento state (on/off)
-uint16_t portamentoTime = 0;      // Portamento time in milliseconds (0–10000 ms)
-bool portamentoActive = false;  // Tracks if portamento is currently running
+bool portamentoOn = false;         // Portamento state (on/off)
+uint16_t portamentoTime = 0;       // Portamento time in milliseconds (0–10000 ms)
+uint16_t portamentoTimestr = 0;    // Display 0-127
+bool portamentoActive = false;     // Tracks if portamento is currently running
 unsigned long glideStartTime = 0;  // Start time for portamento
 float currentMV_a = 0.0;           // Current mV value for channel_a
 float targetMV_a = 0.0;            // Target mV value for channel_a
@@ -65,7 +66,9 @@ int FM_AT_RANGE_UPPER = 0;
 int FM_AT_RANGE_LOWER = 0;
 
 float FM_MOD_WHEEL = 0.00f;
+float FM_MOD_WHEEL_STR = 0.00f;
 float FM_AT_WHEEL = 0.00f;
+float FM_AT_WHEEL_STR = 0.00f;
 
 int BEND_WHEEL = 0;
 int TM_RANGE = 0;

@@ -5,7 +5,7 @@
 
        Filesystem 1.5Mb/0.5Mb
 
-      Version 1.0
+      Version 1.2
 
       Copyright (C) 2020 Craig Barnes
 
@@ -133,19 +133,38 @@ void saveSettingsToSD() {
 
   File file = LittleFS.open("settings.txt", "w");
   if (file) {
-    file.print("LFORATE,"); file.println(LFORATE);
-    file.print("BEND_WHEEL,"); file.println(BEND_WHEEL);
-    file.print("LFOWAVE,"); file.println(LFOWAVE);
-    file.print("FM_MOD_WHEEL,"); file.println(FM_MOD_WHEEL);
-    file.print("FM_AT_WHEEL,"); file.println(FM_AT_WHEEL);
-    file.print("GLIDE_SW,"); file.println(GLIDE_SW);
-    file.print("GLIDE_TIME,"); file.println(GLIDE_TIME);
-    file.print("POLYMODE,"); file.println(POLYMODE);
-    file.print("keyboardMode,"); file.println(keyboardMode);
-    file.print("DETUNE,"); file.println(DETUNE);
-    file.print("LFOMULT,"); file.println(LFOMULT);
-    file.print("LFOALT,"); file.println(LFOALT);
-    file.print("masterChan,"); file.println(masterChan);
+    file.print("LFORATE,");
+    file.println(LFORATE);
+    file.print("BEND_WHEEL,");
+    file.println(BEND_WHEEL);
+    file.print("LFOWAVE,");
+    file.println(LFOWAVE);
+    file.print("FM_MOD_WHEEL,");
+    file.println(FM_MOD_WHEEL);
+    file.print("FM_AT_WHEEL,");
+    file.println(FM_AT_WHEEL);
+    file.print("portamentoOn,");
+    file.println(portamentoOn);
+    file.print("portamentoTime,");
+    file.println(portamentoTime);
+    file.print("POLYMODE,");
+    file.println(POLYMODE);
+    file.print("keyboardMode,");
+    file.println(keyboardMode);
+    file.print("DETUNE,");
+    file.println(DETUNE);
+    file.print("LFOMULT,");
+    file.println(LFOMULT);
+    file.print("LFOALT,");
+    file.println(LFOALT);
+    file.print("masterChan,");
+    file.println(masterChan);
+    file.print("portamentoTimestr,");
+    file.println(portamentoTimestr);
+    file.print("FM_MOD_WHEEL_STR,");
+    file.println(FM_MOD_WHEEL_STR);
+    file.print("FM_AT_WHEEL_STR,");
+    file.println(FM_AT_WHEEL_STR);
     file.close();
     Serial.println("Settings saved to LittleFS.");
   } else {
@@ -169,14 +188,17 @@ void loadSettingsFromSD() {
         else if (key == "LFOWAVE") LFOWAVE = value;
         else if (key == "FM_MOD_WHEEL") FM_MOD_WHEEL = value;
         else if (key == "FM_AT_WHEEL") FM_AT_WHEEL = value;
-        else if (key == "GLIDE_SW") GLIDE_SW = value;
-        else if (key == "GLIDE_TIME") GLIDE_TIME = value;
+        else if (key == "portamentoOn") portamentoOn = value;
+        else if (key == "portamentoTime") portamentoTime = value;
         else if (key == "POLYMODE") POLYMODE = value;
         else if (key == "keyboardMode") keyboardMode = value;
         else if (key == "DETUNE") DETUNE = value;
         else if (key == "LFOMULT") LFOMULT = value;
         else if (key == "LFOALT") LFOALT = value;
         else if (key == "masterChan") masterChan = value;
+        else if (key == "portamentoTimestr") portamentoTimestr = value;
+        else if (key == "FM_MOD_WHEEL_STR") FM_MOD_WHEEL_STR = value;
+        else if (key == "FM_AT_WHEEL_STR") FM_AT_WHEEL_STR = value;
       }
     }
     file.close();
@@ -217,31 +239,42 @@ void updateMenu() {
   bool downState = digitalRead(SWITCH_DOWN);
   bool selectState = digitalRead(SWITCH_SELECT);
 
+  // Debounce delay
+  static unsigned long lastDebounceTime = 0;
+  const unsigned long debounceDelay = 50;
+
   // UP button
-  if (upState == LOW && lastUpState == HIGH) {
+  if ((upState == LOW) && (lastUpState == HIGH) && (millis() - lastDebounceTime > debounceDelay)) {
+    lastDebounceTime = millis();
+    lastMenuInteraction = millis();
+    settingsSaved = false;
+
     if (!editing) {
       currentMenu = (MenuState)((currentMenu - 1 + MENU_TOTAL_ITEMS) % MENU_TOTAL_ITEMS);
     } else {
       incrementMenuValue(1);
-      lastMenuInteraction = millis();
-    settingsSaved = false;
     }
   }
 
   // DOWN button
-  if (downState == LOW && lastDownState == HIGH) {
+  if ((downState == LOW) && (lastDownState == HIGH) && (millis() - lastDebounceTime > debounceDelay)) {
+    lastDebounceTime = millis();
+    lastMenuInteraction = millis();
+    settingsSaved = false;
+
     if (!editing) {
       currentMenu = (MenuState)((currentMenu + 1) % MENU_TOTAL_ITEMS);
     } else {
       incrementMenuValue(-1);
-      lastMenuInteraction = millis();
-    settingsSaved = false;
     }
   }
 
   // SELECT button
-  if (selectState == LOW && lastSelectState == HIGH) {
+  if ((selectState == LOW) && (lastSelectState == HIGH) && (millis() - lastDebounceTime > debounceDelay)) {
+    lastDebounceTime = millis();
     editing = !editing;
+    lastMenuInteraction = millis();
+    settingsSaved = false;
   }
 
   lastUpState = upState;
@@ -267,19 +300,22 @@ void incrementMenuValue(int delta) {
       BEND_WHEEL = constrain(BEND_WHEEL + delta, 0, 12);
       break;
     case MENU_FM_MOD_WHEEL:
-      FM_MOD_WHEEL = constrain(FM_MOD_WHEEL + delta, 0, 127);
+      FM_MOD_WHEEL_STR = constrain(FM_MOD_WHEEL_STR + delta, 0, 127);
+      FM_MOD_WHEEL = map(FM_MOD_WHEEL_STR, 0, 127, 0, 16.2);
       break;
     case MENU_FM_AT_WHEEL:
-      FM_AT_WHEEL = constrain(FM_AT_WHEEL + delta, 0, 127);
+      FM_AT_WHEEL_STR = constrain(FM_AT_WHEEL_STR + delta, 0, 127);
+      FM_AT_WHEEL = map(FM_AT_WHEEL_STR, 0, 127, 0, 16.2);
       break;
     case MENU_DETUNE:
       DETUNE = constrain(DETUNE + delta, 0, 127);
       break;
     case MENU_GLIDE_SW:
-      GLIDE_SW = !GLIDE_SW;
+      portamentoOn = !portamentoOn;
       break;
     case MENU_GLIDE_TIME:
-      GLIDE_TIME = constrain(GLIDE_TIME + delta, 0, 127);
+      portamentoTimestr = constrain(portamentoTimestr + delta, 0, 127);
+      portamentoTime = map(portamentoTimestr, 0, 127, 0, 10000);
       break;
     case MENU_POLYMODE:
       POLYMODE = !POLYMODE;
@@ -376,22 +412,22 @@ void displayMenu() {
       case MENU_LFOMULT:
         display.print("LFO Mult: ");
         switch (LFOMULT) {
-            case 0:
-              display.println("x 0.5");
-              break;
-            case 1:
-              display.println("x 1.0");
-              break;
-            case 2:
-              display.println("x 1.5");
-              break;
-            case 3:
-              display.println("x 2.0");
-              break;
-            case 4:
-              display.println("x 3.0");
-              break;
-          }
+          case 0:
+            display.println("x 0.5");
+            break;
+          case 1:
+            display.println("x 1.0");
+            break;
+          case 2:
+            display.println("x 1.5");
+            break;
+          case 3:
+            display.println("x 2.0");
+            break;
+          case 4:
+            display.println("x 3.0");
+            break;
+        }
         break;
       case MENU_LFOALT:
         display.print("LFO Alt:  ");
@@ -403,23 +439,23 @@ void displayMenu() {
         break;
       case MENU_FM_MOD_WHEEL:
         display.print("FM Depth:   ");
-        display.println(FM_MOD_WHEEL);
+        display.println(FM_MOD_WHEEL_STR);
         break;
       case MENU_FM_AT_WHEEL:
         display.print("AT Depth:   ");
-        display.println(FM_AT_WHEEL);
+        display.println(FM_AT_WHEEL_STR);
         break;
       case MENU_DETUNE:
         display.print("Detune:     ");
         display.println(DETUNE);
         break;
       case MENU_GLIDE_SW:
-        display.print("Glide SW:  ");
-        display.println(GLIDE_SW ? "On" : "Off");
+        display.print("Glide SW:   ");
+        display.println(portamentoOn ? "On" : "Off");
         break;
       case MENU_GLIDE_TIME:
         display.print("Glide Time: ");
-        display.println(GLIDE_TIME);
+        display.println(portamentoTimestr);
         break;
       case MENU_POLYMODE:
         display.print("PolyMode:   ");
@@ -427,16 +463,16 @@ void displayMenu() {
         break;
       case MENU_NOTEPRIORITY:
         display.print("Priority:   ");
-        switch(keyboardMode) {
+        switch (keyboardMode) {
           case 0:
-          display.println("Bottom");
-          break;
+            display.println("Bottom");
+            break;
           case 1:
-          display.println("Top");
-          break;
+            display.println("Top");
+            break;
           case 2:
-          display.println("Last");
-          break;
+            display.println("Last");
+            break;
         }
         break;
       case MENU_MIDICHANNEL:
@@ -518,9 +554,8 @@ void myControlChange(byte channel, byte number, byte value) {
         break;
 
       case 5:                                           // Portamento time
+        portamentoTimestr = value;
         portamentoTime = map(value, 0, 127, 0, 10000);  // Map to a max of 2 seconds
-        Serial.print("Portamento Time: ");
-        Serial.println(portamentoTime);
         break;
 
       case 15:
@@ -537,36 +572,6 @@ void myControlChange(byte channel, byte number, byte value) {
 
       case 19:
         FM_AT_WHEEL = map(value, 0, 127, 0, 16.2);
-        break;
-
-      case 21:
-        value = map(value, 0, 127, 0, 2);
-        switch (value) {
-          case 0:
-            OCTAVE_A = -12;
-            break;
-          case 1:
-            OCTAVE_A = 0;
-            break;
-          case 2:
-            OCTAVE_A = 12;
-            break;
-        }
-        break;
-
-      case 22:
-        value = map(value, 0, 127, 0, 2);
-        switch (value) {
-          case 0:
-            OCTAVE_B = -12;
-            break;
-          case 1:
-            OCTAVE_B = 0;
-            break;
-          case 2:
-            OCTAVE_B = 12;
-            break;
-        }
         break;
 
       case 65:  // Portamento on/off
@@ -846,7 +851,6 @@ void updateVoice1() {
   finalmV = (currentMV_c + additionalmV);
   sample_data1 = (channel_c & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
   outputDAC(DAC_NOTE1, sample_data1);
-
 
   sample_data1 = (channel_e & 0xFFF0000F) | (((int(map(LFORATE, 0, 127, 0, 21940))) & 0xFFFF) << 4);
   outputDAC(DAC_NOTE1, sample_data1);
