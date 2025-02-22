@@ -4,6 +4,8 @@ This MIDI to CV based on the RP2040 Waveshare Zero board is a 3 note polyphonic 
 
 In standard mode the MIDI to CV is unison, all 3 CV outputs are identical, with a detune option that slightly detunes VCO2 & more on VCO3.
 
+Polymode will enable a dynamic 3 note paraphonic synth where pressing more than 1 key will switch the second and third notes to the pitch that has been requested.
+
 There is an onboard LFO based on the Electric Druid TapLFO3-D chip. 
 This is a voltage controlled LFO capable of 16 waveforms and and is merged into the CV lines based on your settings for FM/AT depth.
 
