@@ -5,7 +5,7 @@
 
        Filesystem 1.5Mb/0.5Mb
 
-      Version 1.2
+      Version 1.3
 
       Copyright (C) 2020 Craig Barnes
 
