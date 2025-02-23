@@ -229,16 +229,17 @@ void lfoalt_task() {
 void loop() {
   updateMenu();
 
-    // Handle the display of "Settings Saved" message
+  // Display "Saved" message if triggered
   if (showSaveMessage) {
     if (millis() - saveMessageStartTime < saveMessageDuration) {
       displaySaveMessage();
     } else {
-      showSaveMessage = false;  // Stop showing the message after the duration
-      displayMenu();            // Return to normal menu display
+      showSaveMessage = false;
+      menuNeedsUpdate = true;  // Redraw menu after message disappears
     }
-  } else {
+  } else if (menuNeedsUpdate) {
     displayMenu();
+    menuNeedsUpdate = false;  // Reset after updating
   }
 
   if (!settingsSaved && (millis() - lastMenuInteraction > 5000)) {
@@ -266,11 +267,13 @@ void updateMenu() {
 
   unsigned long currentMillis = millis();
 
-  // UP button logic
+  // --- UP button logic ---
   if (upState == LOW && lastUpState == HIGH) {
+    // Button just pressed
     upPressTime = currentMillis;
     lastMenuInteraction = currentMillis;
     settingsSaved = false;
+    menuNeedsUpdate = true;
 
     if (!editing) {
       currentMenu = (MenuState)((currentMenu - 1 + MENU_TOTAL_ITEMS) % MENU_TOTAL_ITEMS);
@@ -279,9 +282,11 @@ void updateMenu() {
     }
   } else if (upState == LOW && (currentMillis - upPressTime > initialDelay)) {
     // Auto-repeat after initial delay
-    if ((currentMillis - upPressTime) % repeatRate < 10) {  // Adjust for repeat interval
+    if ((currentMillis - upPressTime) % repeatRate < 10) {
       lastMenuInteraction = currentMillis;
       settingsSaved = false;
+      menuNeedsUpdate = true;
+
       if (editing) {
         incrementMenuValue(1);
       } else {
@@ -290,11 +295,13 @@ void updateMenu() {
     }
   }
 
-  // DOWN button logic
+  // --- DOWN button logic ---
   if (downState == LOW && lastDownState == HIGH) {
+    // Button just pressed
     downPressTime = currentMillis;
     lastMenuInteraction = currentMillis;
     settingsSaved = false;
+    menuNeedsUpdate = true;
 
     if (!editing) {
       currentMenu = (MenuState)((currentMenu + 1) % MENU_TOTAL_ITEMS);
@@ -306,6 +313,8 @@ void updateMenu() {
     if ((currentMillis - downPressTime) % repeatRate < 10) {
       lastMenuInteraction = currentMillis;
       settingsSaved = false;
+      menuNeedsUpdate = true;
+
       if (editing) {
         incrementMenuValue(-1);
       } else {
@@ -314,17 +323,19 @@ void updateMenu() {
     }
   }
 
-  // SELECT button logic (toggles editing mode)
+  // --- SELECT button logic ---
   if (selectState == LOW && lastSelectState == HIGH) {
     editing = !editing;
     lastMenuInteraction = currentMillis;
     settingsSaved = false;
+    menuNeedsUpdate = true;
   }
 
   lastUpState = upState;
   lastDownState = downState;
   lastSelectState = selectState;
 }
+
 
 void incrementMenuValue(int delta) {
   switch (currentMenu) {
@@ -373,6 +384,8 @@ void incrementMenuValue(int delta) {
     default:
       break;
   }
+
+  menuNeedsUpdate = true;  // Trigger menu redraw after value change
 }
 
 void displayMenu() {

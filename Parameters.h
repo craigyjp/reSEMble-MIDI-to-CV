@@ -24,6 +24,7 @@ MenuState currentMenu = MENU_LFORATE;
 bool editing = false;
 unsigned long lastMenuInteraction = 0;
 bool settingsSaved = false;
+bool menuNeedsUpdate = true;
 
 bool GLIDE_SW = false;   // Off/On
 int GLIDE_TIME = 0;      // 0-127
