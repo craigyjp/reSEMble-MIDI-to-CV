@@ -124,6 +124,10 @@ void setup() {
   pixels.show();
 
   loadSettingsFromSD();
+
+  lastMenuInteraction = millis();
+  settingsSaved = true;
+
 }
 
 void saveSettingsToSD() {
@@ -167,6 +171,9 @@ void saveSettingsToSD() {
     file.println(FM_AT_WHEEL_STR);
     file.close();
     Serial.println("Settings saved to LittleFS.");
+    // Trigger the "Settings Saved" message
+    showSaveMessage = true;
+    saveMessageStartTime = millis();
   } else {
     Serial.println("Error opening file for writing.");
   }
@@ -221,11 +228,24 @@ void lfoalt_task() {
 
 void loop() {
   updateMenu();
-  displayMenu();
-  if (!settingsSaved && (millis() - lastMenuInteraction > 10000)) {
+
+    // Handle the display of "Settings Saved" message
+  if (showSaveMessage) {
+    if (millis() - saveMessageStartTime < saveMessageDuration) {
+      displaySaveMessage();
+    } else {
+      showSaveMessage = false;  // Stop showing the message after the duration
+      displayMenu();            // Return to normal menu display
+    }
+  } else {
+    displayMenu();
+  }
+
+  if (!settingsSaved && (millis() - lastMenuInteraction > 5000)) {
     saveSettingsToSD();
     settingsSaved = true;
   }
+  
   updateTimers();
   MIDI.read(0);  //MIDI 5 Pin DIN
   mod_task();
@@ -235,18 +255,21 @@ void loop() {
 
 void updateMenu() {
   static bool lastUpState = HIGH, lastDownState = HIGH, lastSelectState = HIGH;
+  static unsigned long upPressTime = 0;
+  static unsigned long downPressTime = 0;
+  static const unsigned long initialDelay = 300;  // Delay before auto-repeat starts (ms)
+  static const unsigned long repeatRate = 50;    // Interval between repeats (ms)
+
   bool upState = digitalRead(SWITCH_UP);
   bool downState = digitalRead(SWITCH_DOWN);
   bool selectState = digitalRead(SWITCH_SELECT);
 
-  // Debounce delay
-  static unsigned long lastDebounceTime = 0;
-  const unsigned long debounceDelay = 50;
+  unsigned long currentMillis = millis();
 
-  // UP button
-  if ((upState == LOW) && (lastUpState == HIGH) && (millis() - lastDebounceTime > debounceDelay)) {
-    lastDebounceTime = millis();
-    lastMenuInteraction = millis();
+  // UP button logic
+  if (upState == LOW && lastUpState == HIGH) {
+    upPressTime = currentMillis;
+    lastMenuInteraction = currentMillis;
     settingsSaved = false;
 
     if (!editing) {
@@ -254,12 +277,23 @@ void updateMenu() {
     } else {
       incrementMenuValue(1);
     }
+  } else if (upState == LOW && (currentMillis - upPressTime > initialDelay)) {
+    // Auto-repeat after initial delay
+    if ((currentMillis - upPressTime) % repeatRate < 10) {  // Adjust for repeat interval
+      lastMenuInteraction = currentMillis;
+      settingsSaved = false;
+      if (editing) {
+        incrementMenuValue(1);
+      } else {
+        currentMenu = (MenuState)((currentMenu - 1 + MENU_TOTAL_ITEMS) % MENU_TOTAL_ITEMS);
+      }
+    }
   }
 
-  // DOWN button
-  if ((downState == LOW) && (lastDownState == HIGH) && (millis() - lastDebounceTime > debounceDelay)) {
-    lastDebounceTime = millis();
-    lastMenuInteraction = millis();
+  // DOWN button logic
+  if (downState == LOW && lastDownState == HIGH) {
+    downPressTime = currentMillis;
+    lastMenuInteraction = currentMillis;
     settingsSaved = false;
 
     if (!editing) {
@@ -267,13 +301,23 @@ void updateMenu() {
     } else {
       incrementMenuValue(-1);
     }
+  } else if (downState == LOW && (currentMillis - downPressTime > initialDelay)) {
+    // Auto-repeat after initial delay
+    if ((currentMillis - downPressTime) % repeatRate < 10) {
+      lastMenuInteraction = currentMillis;
+      settingsSaved = false;
+      if (editing) {
+        incrementMenuValue(-1);
+      } else {
+        currentMenu = (MenuState)((currentMenu + 1) % MENU_TOTAL_ITEMS);
+      }
+    }
   }
 
-  // SELECT button
-  if ((selectState == LOW) && (lastSelectState == HIGH) && (millis() - lastDebounceTime > debounceDelay)) {
-    lastDebounceTime = millis();
+  // SELECT button logic (toggles editing mode)
+  if (selectState == LOW && lastSelectState == HIGH) {
     editing = !editing;
-    lastMenuInteraction = millis();
+    lastMenuInteraction = currentMillis;
     settingsSaved = false;
   }
 
@@ -498,6 +542,16 @@ void displayMenu() {
   }
 
   display.display();
+}
+
+void displaySaveMessage() {
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor((SCREEN_WIDTH - (6 * 12)) / 2, SCREEN_HEIGHT / 2 - 8);  // Center the message
+  display.println("Saved");
+  display.display();
+  display.setTextSize(1);
 }
 
 void myPitchBend(byte channel, int bend) {

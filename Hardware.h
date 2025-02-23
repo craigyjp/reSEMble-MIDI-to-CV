@@ -1,8 +1,8 @@
 #define NOTE_SF 274.4 // 1V/Octave
 #define VEL_SF 256.0
 
-#define LED_PIN 23    // Define the pin for the built-in RGB LED YD-RP2040
-//#define LED_PIN 16    // Define the pin for the built-in RGB LED ZERO
+//#define LED_PIN 23    // Define the pin for the built-in RGB LED YD-RP2040
+#define LED_PIN 16    // Define the pin for the built-in RGB LED ZERO
 
 #define NUM_PIXELS 1  // Number of WS2812 LEDs
 

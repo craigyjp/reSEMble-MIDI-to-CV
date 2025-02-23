@@ -16,6 +16,10 @@ enum MenuState {
   MENU_TOTAL_ITEMS
 };
 
+bool showSaveMessage = false;
+unsigned long saveMessageStartTime = 0;
+const unsigned long saveMessageDuration = 500;  // 2 seconds
+
 MenuState currentMenu = MENU_LFORATE;
 bool editing = false;
 unsigned long lastMenuInteraction = 0;
