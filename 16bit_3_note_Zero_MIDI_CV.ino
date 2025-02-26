@@ -62,8 +62,8 @@ struct VoiceAndNote voices[NO_OF_VOICES] = {
 };
 
 boolean voiceOn[NO_OF_VOICES] = { false };
-bool notes[128] = { 0 }, initial_loop = 1;
-int8_t noteOrder[40] = { 0 }, orderIndx = { 0 };
+bool notes[88] = { 0 }, initial_loop = 1;
+int8_t noteOrder[80] = { 0 }, orderIndx = { 0 };
 bool S1, S2;
 
 // MIDI setup
@@ -127,7 +127,482 @@ void setup() {
 
   lastMenuInteraction = millis();
   settingsSaved = true;
+}
 
+void commandTopNote() {
+  int highestNote = -1;
+
+  // Find the highest active note
+  for (int i = 87; i >= 0; i--) {
+    if (notes[i]) {
+      highestNote = i;
+      break;
+    }
+  }
+
+  // If a valid highest note was found, play it
+  if (highestNote != -1) {
+    commandNote(highestNote);
+  } else {  // No active notes
+    digitalWrite(GATE_NOTE1, LOW);
+    digitalWrite(GATE_LED, HIGH);
+  }
+}
+
+void commandBottomNote() {
+  int lowestNote = -1;
+
+  // Find the lowest active note
+  for (int i = 0; i < 88; i++) {
+    if (notes[i]) {
+      lowestNote = i;
+      break;
+    }
+  }
+
+  // If a valid lowest note was found, play it
+  if (lowestNote != -1) {
+    commandNote(lowestNote);
+  } else {  // No active notes
+    digitalWrite(GATE_NOTE1, LOW);
+    digitalWrite(GATE_LED, HIGH);
+  }
+}
+
+void commandLastNote() {
+  for (int i = 0; i < 80; i++) {
+    int noteIndx = noteOrder[mod(orderIndx - i, 80)];
+    if (noteIndx >= 0 && notes[noteIndx]) {  // Ensure it's a valid note
+      commandNote(noteIndx);
+      return;
+    }
+  }
+  // No active notes, turn off gate
+  digitalWrite(GATE_NOTE1, LOW);
+  digitalWrite(GATE_LED, HIGH);
+}
+
+void commandNote(int noteMsg) {
+  if (noteMsg < 0 || noteMsg > 127) return;  // Ensure valid MIDI note range
+
+  // **Check if this note is actually the correct priority note**
+  int expectedNote = -1;
+
+  switch (keyboardMode) {
+    case 0:  // Highest note priority
+      expectedNote = getTopNote();
+      break;
+
+    case 1:  // Lowest note priority
+      expectedNote = getBottomNote();
+      break;
+
+    case 2:  // Last note priority
+      expectedNote = getLastNote();
+      break;
+  }
+
+  if (noteMsg != expectedNote) return;  // **Ignore notes that don’t match priority**
+
+  // Set the selected note
+  note1 = noteMsg;
+
+  // **Trigger Gate and Trigger Outputs ONLY for the correct priority note**
+  digitalWrite(TRIG_NOTE1, HIGH);
+  digitalWrite(TRIG_LED, LOW);
+  digitalWrite(GATE_NOTE1, HIGH);
+  digitalWrite(GATE_LED, LOW);
+  noteTrig = millis();
+
+  // Calculate and apply target voltage
+  targetMV_a = (unsigned int)(((float)(noteMsg + transpose + realoctave) * NOTE_SF + 0.5));
+  targetMV_b = targetMV_a;
+  targetMV_c = targetMV_a;
+
+  if (!portamentoOn) {
+    // Instantly set voltage if portamento is OFF
+    currentMV_a = targetMV_a;
+    currentMV_b = targetMV_b;
+    currentMV_c = targetMV_c;
+  } else {
+    // Start glide if portamento is ON
+    initialMV_a = currentMV_a;
+    initialMV_b = currentMV_b;
+    initialMV_c = currentMV_c;
+    glideStartTime = millis();
+    portamentoActive = true;
+  }
+}
+
+int getTopNote() {
+  for (int i = 87; i >= 0; i--) {
+    if (notes[i]) return i;
+  }
+  return -1;
+}
+
+int getBottomNote() {
+  for (int i = 0; i < 88; i++) {
+    if (notes[i]) return i;
+  }
+  return -1;
+}
+
+int getLastNote() {
+  for (int i = 0; i < 80; i++) {
+    int noteIndx = noteOrder[mod(orderIndx - i, 80)];
+    if (noteIndx >= 0 && notes[noteIndx]) {
+      return noteIndx;
+    }
+  }
+  return -1;
+}
+
+void myNoteOn(byte channel, byte note, byte velocity) {
+  if (channel == masterChan) {
+    if (note < 0 || note > 127) return;
+
+    // Store note state
+    if (velocity > 0) {
+      notes[note] = true;
+    } else {
+      notes[note] = false;
+    }
+
+    // **Find the correct priority note BEFORE calling commandNote()**
+    int validNote = -1;
+
+    switch (keyboardMode) {
+      case 0:  // Highest note priority
+        validNote = getTopNote();
+        break;
+
+      case 1:  // Lowest note priority
+        validNote = getBottomNote();
+        break;
+
+      case 2:  // Last note priority
+        if (velocity > 0) {  
+          orderIndx = (orderIndx + 1) % 80;  
+          noteOrder[orderIndx] = note;
+        }
+        validNote = getLastNote();
+        break;
+    }
+
+    // **Only trigger the gate if the note is the correct priority**
+    if (validNote == note) {
+      commandNote(validNote);
+    }
+  }
+}
+
+void myNoteOff(byte channel, byte note, byte velocity) {
+  if (channel == masterChan) {
+    notes[note] = false; // Mark note as off
+
+    int validNote = -1;
+
+    switch (keyboardMode) {
+      case 0: // Highest note priority
+        validNote = getTopNote();
+        break;
+
+      case 1: // Lowest note priority
+        validNote = getBottomNote();
+        break;
+
+      case 2: // Last note priority
+        validNote = getLastNote();
+        break;
+    }
+
+    // **Only call commandNote() if we are switching to a new note**
+    if (validNote != -1 && validNote != note1) {
+      commandNote(validNote);
+    } else if (validNote == -1) {
+      // **No notes left: Turn off Gate and Trigger**
+      digitalWrite(GATE_NOTE1, LOW);
+      digitalWrite(GATE_LED, HIGH);
+      digitalWrite(TRIG_NOTE1, LOW);
+      digitalWrite(TRIG_LED, HIGH);
+    }
+  }
+}
+
+
+void loop() {
+  updateMenu();
+
+  // Display "Saved" message if triggered
+  if (showSaveMessage) {
+    if (millis() - saveMessageStartTime < saveMessageDuration) {
+      displaySaveMessage();
+    } else {
+      showSaveMessage = false;
+      menuNeedsUpdate = true;  // Redraw menu after message disappears
+    }
+  } else if (menuNeedsUpdate) {
+    displayMenu();
+    menuNeedsUpdate = false;  // Reset after updating
+  }
+
+  if (!settingsSaved && (millis() - lastMenuInteraction > 5000)) {
+    saveSettingsToSD();
+    settingsSaved = true;
+  }
+
+  updateTimers();
+  MIDI.read(0);  //MIDI 5 Pin DIN
+  mod_task();
+  lfoalt_task();
+  updateVoice1();
+}
+
+
+void myPitchBend(byte channel, int bend) {
+  if (channel == masterChan) {
+    switch (BEND_WHEEL) {
+      case 12:
+        bend_data = map(bend, -8192, 8191, -3235, 3235);
+        break;
+
+      case 11:
+        bend_data = map(bend, -8192, 8191, -2970, 2969);
+        break;
+
+      case 10:
+        bend_data = map(bend, -8192, 8191, -2700, 2699);
+        break;
+
+      case 9:
+        bend_data = map(bend, -8192, 8191, -2430, 2429);
+        break;
+
+      case 8:
+        bend_data = map(bend, -8192, 8191, -2160, 2159);
+        break;
+
+      case 7:
+        bend_data = map(bend, -8192, 8191, -1890, 1889);
+        break;
+
+      case 6:
+        bend_data = map(bend, -8192, 8191, -1620, 1619);
+        break;
+
+      case 5:
+        bend_data = map(bend, -8192, 8191, -1350, 1349);
+        break;
+
+      case 4:
+        bend_data = map(bend, -8192, 8191, -1080, 1079);
+        break;
+
+      case 3:
+        bend_data = map(bend, -8192, 8191, -810, 809);
+        break;
+
+      case 2:
+        bend_data = map(bend, -8192, 8191, -540, 539);
+        break;
+
+      case 1:
+        bend_data = map(bend, -8192, 8191, -270, 270);
+        break;
+
+      case 0:
+        bend_data = 0;
+        break;
+    }
+  }
+}
+
+// Reads MIDI CC messages
+void myControlChange(byte channel, byte number, byte value) {
+  if (channel == masterChan) {
+    switch (number) {
+
+      case 1:
+        FM_RANGE_UPPER = int(value * FM_MOD_WHEEL);
+        FM_RANGE_LOWER = (FM_RANGE_UPPER - FM_RANGE_UPPER - FM_RANGE_UPPER);
+        break;
+
+      case 5:  // Portamento time
+        portamentoTimestr = value;
+        portamentoTime = map(value, 0, 127, 0, 10000);  // Map to a max of 2 seconds
+        break;
+
+      case 15:
+        DETUNE = value;
+        break;
+
+      case 16:
+        BEND_WHEEL = map(value, 0, 127, 0, 12);
+        break;
+
+      case 17:
+        FM_MOD_WHEEL = map(value, 0, 127, 0, 16.2);
+        break;
+
+      case 19:
+        FM_AT_WHEEL = map(value, 0, 127, 0, 16.2);
+        break;
+
+      case 65:  // Portamento on/off
+        switch (value) {
+          case 127:
+            portamentoOn = true;
+            Serial.print("Portamento On: ");
+            Serial.println(portamentoOn);
+            break;
+          case 0:
+            portamentoOn = false;
+            Serial.print("Portamento Off: ");
+            Serial.println(portamentoOn);
+            break;
+        }
+        break;
+
+      case 123:
+        switch (value) {
+          case 127:
+            allNotesOff();
+            break;
+        }
+        break;
+
+      case 127:
+        keyboardMode = map(value, 0, 127, 0, 2);
+        if (keyboardMode > 0 && keyboardMode < 3) {
+          allNotesOff();
+        }
+        break;
+    }
+  }
+}
+
+void myAfterTouch(byte channel, byte value) {
+  if (channel == masterChan) {
+    FM_AT_RANGE_UPPER = int(value * FM_AT_WHEEL);
+    FM_AT_RANGE_LOWER = (FM_AT_RANGE_UPPER - FM_AT_RANGE_UPPER - FM_AT_RANGE_UPPER);
+  }
+}
+
+// Get the LFO input on the FM_INPUT
+void mod_task() {
+
+  MOD_VALUE = analogRead(FM_INPUT);
+  FM_VALUE = map(MOD_VALUE, 0, 4095, FM_RANGE_LOWER, FM_RANGE_UPPER);
+  FM_AT_VALUE = map(MOD_VALUE, 0, 4095, FM_AT_RANGE_LOWER, FM_AT_RANGE_UPPER);
+}
+
+// Kills the trigger after 20 mS
+void updateTimers() {
+
+  if (millis() > noteTrig + trigTimeout) {
+    digitalWrite(TRIG_NOTE1, LOW);  // Set trigger low after 20 msec
+    digitalWrite(TRIG_LED, HIGH);
+  }
+}
+
+// Updates the DAC with the note1 data and adds in all offsets, bend, modulation, aftertouch, octave range
+void updateVoice1() {
+  static unsigned long lastUpdateTime = 0;  // Tracks the last time this function was called
+  unsigned long currentTime = millis();     // Get the current time in milliseconds
+  unsigned long deltaTime = currentTime - lastUpdateTime;
+
+  if (portamentoActive) {
+    // Calculate the progress as a fraction of portamentoTime
+    float progress = (float)(millis() - glideStartTime) / (float)portamentoTime;
+
+    // Clamp progress between 0.0 and 1.0
+    if (progress > 1.0) progress = 1.0;
+
+    // Apply an **adjusted** exponential scaling for smooth glide
+    float rate = 3.5;  // Tweak this value for a more natural feel
+    float exponentialProgress = (1.0 - exp(-rate * progress)) / (1.0 - exp(-rate));
+
+    // Interpolate currentMV values for an **exponential glide**
+    currentMV_a = initialMV_a + (targetMV_a - initialMV_a) * exponentialProgress;
+    currentMV_b = initialMV_b + (targetMV_b - initialMV_b) * exponentialProgress;
+    currentMV_c = initialMV_c + (targetMV_c - initialMV_c) * exponentialProgress;
+
+    // If the glide is **complete**, snap to final values and disable glide
+    if (progress >= 1.0) {
+      currentMV_a = targetMV_a;
+      currentMV_b = targetMV_b;
+      currentMV_c = targetMV_c;
+      portamentoActive = false;
+    }
+  }
+
+  // Now continuously apply parameters to the frequency calculation
+
+  // Calculate mV for channel_a (Oscillator A)
+  oscanote1 = note1 + OCTAVE_A;  // Apply the correct octave adjustment for this oscillator
+  additionalmV = (unsigned int)(((float)(OCTAVE_A)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
+  finalmV = (currentMV_a + additionalmV);
+  sample_data1 = (channel_a & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
+  outputDAC(DAC_NOTE1, sample_data1);
+
+  // Calculate mV for channel_b (Oscillator B)
+  oscbnote1 = note1 + OCTAVE_B;  // Apply octave B adjustments
+  additionalmV = (unsigned int)(((float)(OCTAVE_B)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + DETUNE));
+  finalmV = (currentMV_b + additionalmV);
+  sample_data1 = (channel_b & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
+  outputDAC(DAC_NOTE1, sample_data1);
+
+  // Calculate mV for channel_c (Oscillator C)
+  osccnote1 = note1 + OCTAVE_C;  // Apply octave C adjustments
+  additionalmV = (unsigned int)(((float)(OCTAVE_C)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + (DETUNE * 2)));
+  finalmV = (currentMV_c + additionalmV);
+  sample_data1 = (channel_c & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
+  outputDAC(DAC_NOTE1, sample_data1);
+
+  sample_data1 = (channel_e & 0xFFF0000F) | (((int(map(LFORATE, 0, 127, 0, 21940))) & 0xFFFF) << 4);
+  outputDAC(DAC_NOTE1, sample_data1);
+
+  sample_data1 = (channel_f & 0xFFF0000F) | (((int(map(LFOWAVE, 0, 7, 0, 21500))) & 0xFFFF) << 4);
+  outputDAC(DAC_NOTE1, sample_data1);
+
+  sample_data1 = (channel_g & 0xFFF0000F) | (((int(map(LFOMULT, 0, 4, 0, 12000))) & 0xFFFF) << 4);
+  outputDAC(DAC_NOTE1, sample_data1);
+
+  // Update last update time
+  lastUpdateTime = currentTime;
+}
+
+// Resets all the notes to off
+void allNotesOff() {
+  digitalWrite(GATE_NOTE1, LOW);
+  digitalWrite(GATE_LED, HIGH);
+
+  voices[0].note = -1;
+
+  voiceOn[0] = false;
+}
+
+void lfoalt_task() {
+  if (LFOALT != lfoalt_old) {
+    if (LFOALT) {
+      digitalWrite(LFO_ALT, LOW);
+    } else {
+      digitalWrite(LFO_ALT, HIGH);
+    }
+    lfoalt_old = LFOALT;
+  }
+}
+
+void outputDAC(int CHIP_SELECT, uint32_t sample_data) {
+  SPI.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE1));
+  digitalWrite(CHIP_SELECT, LOW);
+  delayMicroseconds(1);
+  SPI.transfer16(sample_data >> 16);
+  SPI.transfer16(sample_data);
+  delayMicroseconds(3);  // Settling time delay
+  digitalWrite(CHIP_SELECT, HIGH);
+  SPI.endTransaction();
 }
 
 void saveSettingsToSD() {
@@ -215,51 +690,12 @@ void loadSettingsFromSD() {
   }
 }
 
-void lfoalt_task() {
-  if (LFOALT != lfoalt_old) {
-    if (LFOALT) {
-      digitalWrite(LFO_ALT, LOW);
-    } else {
-      digitalWrite(LFO_ALT, HIGH);
-    }
-    lfoalt_old = LFOALT;
-  }
-}
-
-void loop() {
-  updateMenu();
-
-  // Display "Saved" message if triggered
-  if (showSaveMessage) {
-    if (millis() - saveMessageStartTime < saveMessageDuration) {
-      displaySaveMessage();
-    } else {
-      showSaveMessage = false;
-      menuNeedsUpdate = true;  // Redraw menu after message disappears
-    }
-  } else if (menuNeedsUpdate) {
-    displayMenu();
-    menuNeedsUpdate = false;  // Reset after updating
-  }
-
-  if (!settingsSaved && (millis() - lastMenuInteraction > 5000)) {
-    saveSettingsToSD();
-    settingsSaved = true;
-  }
-  
-  updateTimers();
-  MIDI.read(0);  //MIDI 5 Pin DIN
-  mod_task();
-  lfoalt_task();
-  updateVoice1();
-}
-
 void updateMenu() {
   static bool lastUpState = HIGH, lastDownState = HIGH, lastSelectState = HIGH;
   static unsigned long upPressTime = 0;
   static unsigned long downPressTime = 0;
   static const unsigned long initialDelay = 300;  // Delay before auto-repeat starts (ms)
-  static const unsigned long repeatRate = 50;    // Interval between repeats (ms)
+  static const unsigned long repeatRate = 50;     // Interval between repeats (ms)
 
   bool upState = digitalRead(SWITCH_UP);
   bool downState = digitalRead(SWITCH_DOWN);
@@ -533,10 +969,10 @@ void displayMenu() {
         display.print("Priority:   ");
         switch (keyboardMode) {
           case 0:
-            display.println("Bottom");
+            display.println("Top");
             break;
           case 1:
-            display.println("Top");
+            display.println("Bottom");
             break;
           case 2:
             display.println("Last");
@@ -551,7 +987,6 @@ void displayMenu() {
 
     // Reset text color for the next line
     display.setTextColor(SSD1306_WHITE);
-
   }
 
   display.display();
@@ -567,407 +1002,12 @@ void displaySaveMessage() {
   display.setTextSize(1);
 }
 
-void myPitchBend(byte channel, int bend) {
-  if (channel == masterChan) {
-    switch (BEND_WHEEL) {
-      case 12:
-        bend_data = map(bend, -8192, 8191, -3235, 3235);
-        break;
-
-      case 11:
-        bend_data = map(bend, -8192, 8191, -2970, 2969);
-        break;
-
-      case 10:
-        bend_data = map(bend, -8192, 8191, -2700, 2699);
-        break;
-
-      case 9:
-        bend_data = map(bend, -8192, 8191, -2430, 2429);
-        break;
-
-      case 8:
-        bend_data = map(bend, -8192, 8191, -2160, 2159);
-        break;
-
-      case 7:
-        bend_data = map(bend, -8192, 8191, -1890, 1889);
-        break;
-
-      case 6:
-        bend_data = map(bend, -8192, 8191, -1620, 1619);
-        break;
-
-      case 5:
-        bend_data = map(bend, -8192, 8191, -1350, 1349);
-        break;
-
-      case 4:
-        bend_data = map(bend, -8192, 8191, -1080, 1079);
-        break;
-
-      case 3:
-        bend_data = map(bend, -8192, 8191, -810, 809);
-        break;
-
-      case 2:
-        bend_data = map(bend, -8192, 8191, -540, 539);
-        break;
-
-      case 1:
-        bend_data = map(bend, -8192, 8191, -270, 270);
-        break;
-
-      case 0:
-        bend_data = 0;
-        break;
-    }
-  }
+int mod(int x, int m) {
+  return (x % m + m) % m;  // Ensures positive modulo result
 }
 
-// Reads MIDI CC messages
-void myControlChange(byte channel, byte number, byte value) {
-  if (channel == masterChan) {
-    switch (number) {
 
-      case 1:
-        FM_RANGE_UPPER = int(value * FM_MOD_WHEEL);
-        FM_RANGE_LOWER = (FM_RANGE_UPPER - FM_RANGE_UPPER - FM_RANGE_UPPER);
-        break;
-
-      case 5:                                           // Portamento time
-        portamentoTimestr = value;
-        portamentoTime = map(value, 0, 127, 0, 10000);  // Map to a max of 2 seconds
-        break;
-
-      case 15:
-        DETUNE = value;
-        break;
-
-      case 16:
-        BEND_WHEEL = map(value, 0, 127, 0, 12);
-        break;
-
-      case 17:
-        FM_MOD_WHEEL = map(value, 0, 127, 0, 16.2);
-        break;
-
-      case 19:
-        FM_AT_WHEEL = map(value, 0, 127, 0, 16.2);
-        break;
-
-      case 65:  // Portamento on/off
-        switch (value) {
-          case 127:
-            portamentoOn = true;
-            Serial.print("Portamento On: ");
-            Serial.println(portamentoOn);
-            break;
-          case 0:
-            portamentoOn = false;
-            Serial.print("Portamento Off: ");
-            Serial.println(portamentoOn);
-            break;
-        }
-        break;
-
-      case 123:
-        switch (value) {
-          case 127:
-            allNotesOff();
-            break;
-        }
-        break;
-
-      case 127:
-        keyboardMode = map(value, 0, 127, 0, 2);
-        if (keyboardMode > 0 && keyboardMode < 3) {
-          allNotesOff();
-        }
-        break;
-    }
-  }
-}
-
-void myAfterTouch(byte channel, byte value) {
-  if (channel == masterChan) {
-    FM_AT_RANGE_UPPER = int(value * FM_AT_WHEEL);
-    FM_AT_RANGE_LOWER = (FM_AT_RANGE_UPPER - FM_AT_RANGE_UPPER - FM_AT_RANGE_UPPER);
-  }
-}
-
-// Get the LFO input on the FM_INPUT
-void mod_task() {
-
-  MOD_VALUE = analogRead(FM_INPUT);
-  FM_VALUE = map(MOD_VALUE, 0, 4095, FM_RANGE_LOWER, FM_RANGE_UPPER);
-  FM_AT_VALUE = map(MOD_VALUE, 0, 4095, FM_AT_RANGE_LOWER, FM_AT_RANGE_UPPER);
-}
-
-void commandTopNote() {
-  int topNote = 0;
-  bool noteActive = false;
-
-  for (int i = 0; i < 128; i++) {
-    if (notes[i]) {
-      topNote = i;
-      noteActive = true;
-    }
-  }
-
-  if (noteActive) {
-    commandNote(topNote);
-  } else {  // All notes are off, turn off gate
-    digitalWrite(GATE_NOTE1, LOW);
-  }
-}
-
-void commandBottomNote() {
-  int bottomNote = 0;
-  bool noteActive = false;
-
-  for (int i = 87; i >= 0; i--) {
-    if (notes[i]) {
-      bottomNote = i;
-      noteActive = true;
-    }
-  }
-
-  if (noteActive) {
-    commandNote(bottomNote);
-  } else {  // All notes are off, turn off gate
-    digitalWrite(GATE_NOTE1, LOW);
-  }
-}
-
-void commandLastNote() {
-
-  int8_t noteIndx;
-
-  for (int i = 0; i < 40; i++) {
-    noteIndx = noteOrder[mod(orderIndx - i, 40)];
-    if (notes[noteIndx]) {
-      commandNote(noteIndx);
-      return;
-    }
-  }
-  digitalWrite(GATE_NOTE1, LOW);  // All notes are off
-}
-
-void commandNote(int noteMsg) {
-  note1 = noteMsg;
-  digitalWrite(GATE_NOTE1, HIGH);
-  digitalWrite(TRIG_NOTE1, HIGH);
-  noteTrig[0] = millis();
-}
-
-// MIDI note on callback
-void myNoteOn(byte channel, byte note, byte velocity) {
-  if (channel == masterChan) {
-
-    //Check for out of range notes
-    if (note < 0 || note > 127) return;
-
-    // Calculate new target mV values including all real-time corrections
-    targetMV_a = (unsigned int)(((float)(note + transpose + realoctave) * NOTE_SF + 0.5));
-
-    targetMV_b = (unsigned int)(((float)(note + transpose + realoctave) * NOTE_SF + 0.5));
-
-    targetMV_c = (unsigned int)(((float)(note + transpose + realoctave) * NOTE_SF + 0.5));
-
-    if (portamentoOn) {
-      // If portamento is enabled, start glide from the **current** value
-      initialMV_a = currentMV_a;
-      initialMV_b = currentMV_b;
-      initialMV_c = currentMV_c;
-      glideStartTime = millis();  // Start the glide transition
-      portamentoActive = true;
-    } else {
-      // If portamento is OFF, instantly set frequency
-      currentMV_a = targetMV_a;
-      currentMV_b = targetMV_b;
-      currentMV_c = targetMV_c;
-      portamentoActive = false;
-    }
-
-    switch (keyboardMode) {
-
-      case 0:
-      case 1:
-      case 2:
-        if (keyboardMode == 0) {
-          S1 = 1;
-          S2 = 1;
-        }
-        if (keyboardMode == 1) {
-          S1 = 0;
-          S2 = 1;
-        }
-        if (keyboardMode == 2) {
-          S1 = 0;
-          S2 = 0;
-        }
-        noteMsg = note;
-
-        if (velocity == 0) {
-          notes[noteMsg] = false;
-        } else {
-          notes[noteMsg] = true;
-        }
-        voices[0].velocity = velocity;
-
-        if (S1 && S2) {  // Highest note priority
-          commandTopNote();
-        } else if (!S1 && S2) {  // Lowest note priority
-          commandBottomNote();
-        } else {                 // Last note priority
-          if (notes[noteMsg]) {  // If note is on and using last note priority, add to ordered list
-            orderIndx = (orderIndx + 1) % 40;
-            noteOrder[orderIndx] = noteMsg;
-          }
-          commandLastNote();
-        }
-        break;
-    }
-  }
-}
-
-// MIDI Note Off callback
-void myNoteOff(byte channel, byte note, byte velocity) {
-  if (channel == masterChan) {
-
-    switch (keyboardMode) {
-      case 0:
-      case 1:
-      case 2:
-        if (keyboardMode == 0) {
-          S1 = 1;
-          S2 = 1;
-        }
-        if (keyboardMode == 1) {
-          S1 = 0;
-          S2 = 1;
-        }
-        if (keyboardMode == 2) {
-          S1 = 0;
-          S2 = 0;
-        }
-        noteMsg = note;
-
-        notes[noteMsg] = false;
-
-        if (S1 && S2) {  // Highest note priority
-          commandTopNote();
-        } else if (!S1 && S2) {  // Lowest note priority
-          commandBottomNote();
-        } else {                 // Last note priority
-          if (notes[noteMsg]) {  // If note is on and using last note priority, add to ordered list
-            orderIndx = (orderIndx + 1) % 40;
-            noteOrder[orderIndx] = noteMsg;
-          }
-          commandLastNote();
-        }
-        break;
-    }
-  }
-}
-
-// Kills the trigger after 20 mS
-void updateTimers() {
-
-  if (millis() > noteTrig[0] + trigTimeout) {
-    digitalWrite(TRIG_NOTE1, LOW);  // Set trigger low after 20 msec
-  }
-}
-
-// Updates the DAC with the note1 data and adds in all offsets, bend, modulation, aftertouch, octave range
-void updateVoice1() {
-  static unsigned long lastUpdateTime = 0;  // Tracks the last time this function was called
-  unsigned long currentTime = millis();     // Get the current time in milliseconds
-  unsigned long deltaTime = currentTime - lastUpdateTime;
-
-  if (portamentoActive) {
-    // Calculate the progress as a fraction of portamentoTime
-    float progress = (float)(millis() - glideStartTime) / (float)portamentoTime;
-
-    // Clamp progress between 0.0 and 1.0
-    if (progress > 1.0) progress = 1.0;
-
-    // Apply an **adjusted** exponential scaling for smooth glide
-    float rate = 3.5;  // Tweak this value for a more natural feel
-    float exponentialProgress = (1.0 - exp(-rate * progress)) / (1.0 - exp(-rate));
-
-    // Interpolate currentMV values for an **exponential glide**
-    currentMV_a = initialMV_a + (targetMV_a - initialMV_a) * exponentialProgress;
-    currentMV_b = initialMV_b + (targetMV_b - initialMV_b) * exponentialProgress;
-    currentMV_c = initialMV_c + (targetMV_c - initialMV_c) * exponentialProgress;
-
-    // If the glide is **complete**, snap to final values and disable glide
-    if (progress >= 1.0) {
-      currentMV_a = targetMV_a;
-      currentMV_b = targetMV_b;
-      currentMV_c = targetMV_c;
-      portamentoActive = false;
-    }
-  }
-
-  // Now continuously apply parameters to the frequency calculation
-
-  // Calculate mV for channel_a (Oscillator A)
-  oscanote1 = note1 + OCTAVE_A;  // Apply the correct octave adjustment for this oscillator
-  additionalmV = (unsigned int)(((float)(OCTAVE_A)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
-  finalmV = (currentMV_a + additionalmV);
-  sample_data1 = (channel_a & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  // Calculate mV for channel_b (Oscillator B)
-  oscbnote1 = note1 + OCTAVE_B;  // Apply octave B adjustments
-  additionalmV = (unsigned int)(((float)(OCTAVE_B)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + DETUNE));
-  finalmV = (currentMV_b + additionalmV);
-  sample_data1 = (channel_b & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  // Calculate mV for channel_c (Oscillator C)
-  osccnote1 = note1 + OCTAVE_C;  // Apply octave C adjustments
-  additionalmV = (unsigned int)(((float)(OCTAVE_C)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + (DETUNE * 2)));
-  finalmV = (currentMV_c + additionalmV);
-  sample_data1 = (channel_c & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  sample_data1 = (channel_e & 0xFFF0000F) | (((int(map(LFORATE, 0, 127, 0, 21940))) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  sample_data1 = (channel_f & 0xFFF0000F) | (((int(map(LFOWAVE, 0, 7, 0, 21500))) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  sample_data1 = (channel_g & 0xFFF0000F) | (((int(map(LFOMULT, 0, 4, 0, 12000))) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  // Update last update time
-  lastUpdateTime = currentTime;
-}
-
-// Resets all the notes to off
-void allNotesOff() {
-  digitalWrite(GATE_NOTE1, LOW);
-
-  voices[0].note = -1;
-
-  voiceOn[0] = false;
-}
-
-void outputDAC(int CHIP_SELECT, uint32_t sample_data) {
-  SPI.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE1));
-  digitalWrite(CHIP_SELECT, LOW);
-  delayMicroseconds(1);
-  SPI.transfer16(sample_data >> 16);
-  SPI.transfer16(sample_data);
-  delayMicroseconds(3);  // Settling time delay
-  digitalWrite(CHIP_SELECT, HIGH);
-  SPI.endTransaction();
-}
-
-int mod(int a, int b) {
-  int r = a % b;
-  return r < 0 ? r + b : r;
-}
+// int mod(int a, int b) {
+//   int r = a % b;
+//   return r < 0 ? r + b : r;
+// }

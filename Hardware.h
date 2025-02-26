@@ -10,7 +10,7 @@
 
 // Voices available
 #define NO_OF_VOICES 1
-#define trigTimeout 20
+#define trigTimeout 30
 
 #define FM_INPUT 26  // ADC0
 
@@ -29,6 +29,9 @@
 //Switch select
 #define SWITCH_SELECT 10
 
+#define GATE_LED 11
+#define TRIG_LED 28
+
 //Gate outputs
 #define GATE_NOTE1 14
 
@@ -46,6 +49,11 @@ void setupHardware() {
   pinMode(GATE_NOTE1, OUTPUT);
   digitalWrite(GATE_NOTE1, LOW);
 
+  pinMode(GATE_LED, OUTPUT);
+  digitalWrite(GATE_LED, HIGH);
+  pinMode(TRIG_LED, OUTPUT);
+  digitalWrite(TRIG_LED, HIGH);
+
   pinMode(TRIG_NOTE1, OUTPUT);
   digitalWrite(TRIG_NOTE1, LOW);
 
@@ -55,7 +63,7 @@ void setupHardware() {
   pinMode(LFO_ALT, OUTPUT);
   digitalWrite(LFO_ALT, HIGH);
 
-  SPI.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE1));
+  SPI.beginTransaction(SPISettings(40000000, MSBFIRST, SPI_MODE1));
   digitalWrite(DAC_NOTE1, LOW);
   SPI.transfer16(int_ref_on_flexible_mode >> 16);
   SPI.transfer16(int_ref_on_flexible_mode);
