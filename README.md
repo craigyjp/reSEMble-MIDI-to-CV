@@ -27,3 +27,18 @@ All parameters are saved 10 seconds after the last edit and reloaded on power up
 
 MIDI CC can also be used to control functions thus allowing it to inetgrate into a DAW.
 
+* MIDI CC messages
+  
+CC05 Portamento time 0-127, 0-10 Seconds
+CC15 Detune VCO2 & 3 0-127
+CC16 Bendwheel Range 0-127,  0-12 semitones
+CC17 Modwheel Depth FM 0-127
+CC19 AT Depth FM 0-127
+CC20 LFO Rate 0-127
+CC21 LFO Wave 0-127 (waveform 1-8)
+CC22 LFO Multiplier 0-127 (0.5 to 3.0)
+CC23 LFO alternative waves 0-127, original/alternative
+CC65 Portamento Off/On 0-127, 0=Off, 127=On 
+CC123 AllNotesOff 127
+CC127 Note Priority 0-127, Top, Bottom, Last.
+
