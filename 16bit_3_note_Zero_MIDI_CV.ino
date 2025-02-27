@@ -579,6 +579,22 @@ void myControlChange(byte channel, byte number, byte value) {
         FM_AT_WHEEL = map(value, 0, 127, 0, 16.2);
         break;
 
+      case 20:
+        LFORATE = value;
+        break;
+
+      case 21:
+        LFOWAVE = map(value, 0, 127, 0, 7);
+        break; 
+
+      case 22:
+        LFOMULT = map(value, 0, 127, 0, 4);
+        break;
+
+      case 23:
+        LFOALT = map(value, 0, 127, 0, 1);
+        break;
+
       case 65:  // Portamento on/off
         switch (value) {
           case 127:
@@ -706,24 +722,16 @@ void updateVoice1() {
       break;
 
     case 1:
-      // Calculate mV for channel_a (Oscillator A)
-      //oscanote1 = note1 + OCTAVE_A;  // Apply the correct octave adjustment for this oscillator
+
       finalmV = (unsigned int)(((float)((voices[0].note) + realoctave)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
-      //finalmV = (currentMV_a + additionalmV);
       sample_data1 = (channel_a & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
       outputDAC(DAC_NOTE1, sample_data1);
 
-      // Calculate mV for channel_b (Oscillator B)
-      //oscbnote1 = note1 + OCTAVE_B;  // Apply octave B adjustments
       finalmV = (unsigned int)(((float)((voices[1].note) + realoctave)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
-      //finalmV = (currentMV_b + additionalmV);
       sample_data1 = (channel_b & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
       outputDAC(DAC_NOTE1, sample_data1);
 
-      // Calculate mV for channel_c (Oscillator C)
-      //osccnote1 = note1 + OCTAVE_C;  // Apply octave C adjustments
       finalmV = (unsigned int)(((float)((voices[2].note) + realoctave)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
-      //finalmV = (currentMV_c + additionalmV);
       sample_data1 = (channel_c & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
       outputDAC(DAC_NOTE1, sample_data1);
 
