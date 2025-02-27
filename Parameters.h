@@ -30,6 +30,7 @@ bool menuNeedsUpdate = true;
 bool GLIDE_SW = false;   // Off/On
 int GLIDE_TIME = 0;      // 0-127
 bool POLYMODE = false;   // Off/On
+int validNote = -1;
 
 // Glide
 bool portamentoOn = false;         // Portamento state (on/off)
@@ -97,6 +98,12 @@ volatile bool clockPulseActive = false;
 volatile uint32_t lastPulseTime = 0;
 const uint8_t pulseDuration = 30;  // Short pulse time in milliseconds
 
+byte heldNotes[3] = {255, 255, 255}; // Holds the currently active notes (255 = no note)
+byte heldCount = 0;                  // Number of currently held notes
+
+static unsigned long lastUpdateTime = 0;  // Tracks the last time this function was called
+unsigned long currentTime = millis();     // Get the current time in milliseconds
+unsigned long deltaTime = currentTime - lastUpdateTime;
 
 int masterChan = 1;
 int masterTran;
@@ -109,9 +116,15 @@ int octave = 0;
 int realoctave = -36;
 int bend_data;
 int note1;
+int note2;
+int note3;
 int oscanote1;
 int oscbnote1;
 int osccnote1;
+int voiceToReturn = -1; 
+long earliestTime = millis();  //For voice allocation - initialise to now
+int lastUsedVoice = 0; // Global variable to store the last used voice
+
 bool reset = false;
 bool displayvalues = false;
 bool osc1Through = false;

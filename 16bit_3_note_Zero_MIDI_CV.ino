@@ -5,7 +5,7 @@
 
        Filesystem 1.5Mb/0.5Mb
 
-      Version 1.3
+      Version 1.4
 
       Copyright (C) 2020 Craig Barnes
 
@@ -59,9 +59,11 @@ struct NoteData {
 
 struct VoiceAndNote voices[NO_OF_VOICES] = {
   { -1, -1, 0, false, false, 0, -1, false },
+  { -1, -1, 0, false, false, 0, -1, false },
+  { -1, -1, 0, false, false, 0, -1, false }
 };
 
-boolean voiceOn[NO_OF_VOICES] = { false };
+boolean voiceOn[NO_OF_VOICES] = { false, false, false };
 bool notes[88] = { 0 }, initial_loop = 1;
 int8_t noteOrder[80] = { 0 }, orderIndx = { 0 };
 bool S1, S2;
@@ -130,8 +132,184 @@ void setup() {
   settingsSaved = true;
 }
 
+void myNoteOn(byte channel, byte note, byte velocity) {
+  if (channel == masterChan) {
+    if (note > 127) return;  // Remove unnecessary note < 0 check
+
+    switch (POLYMODE) {
+      case 0:  // Monophonic Mode
+        if (velocity > 0) {
+          notes[note] = true;
+        } else {
+          notes[note] = false;
+        }
+
+        validNote = -1;
+
+        switch (keyboardMode) {
+          case 0:  // Highest note priority
+            validNote = getTopNote();
+            break;
+          case 1:  // Lowest note priority
+            validNote = getBottomNote();
+            break;
+          case 2:  // Last note priority
+            if (velocity > 0) {
+              orderIndx = (orderIndx + 1) % 80;
+              noteOrder[orderIndx] = note;
+            }
+            validNote = getLastNote();
+            break;
+        }
+
+        if (validNote == note) {
+          commandNote(validNote);
+        }
+        break;
+
+      case 1:  // Polyphonic Unison Mode
+        // If the note is already held, ignore it
+        for (int i = 0; i < heldCount; i++) {
+          if (heldNotes[i] == note) return;
+        }
+
+        // Store the new note into the heldNotes list
+        if (heldCount < 3) {
+          heldNotes[heldCount] = note;
+          heldCount++;
+        }
+
+        // Assign voices based on held notes
+        voices[0].note = heldNotes[0];  // All voices play the first held note
+        voices[1].note = (heldCount > 1) ? heldNotes[1] : heldNotes[0];
+        voices[2].note = (heldCount > 2) ? heldNotes[2] : heldNotes[0];
+
+        // Set velocity and key state
+        for (int i = 0; i < 3; i++) {
+          voices[i].velocity = velocity;
+          voices[i].timeOn = millis();
+          voices[i].keyDown = true;
+          voiceOn[i] = true;
+        }
+
+        // Trigger gate and trigger signals
+        digitalWrite(GATE_NOTE1, HIGH);
+        digitalWrite(GATE_LED, LOW);
+        digitalWrite(TRIG_NOTE1, HIGH);
+        digitalWrite(TRIG_LED, LOW);
+        break;
+    }
+  }
+}
+
+void myNoteOff(byte channel, byte note, byte velocity) {
+  if (channel == masterChan) {
+    switch (POLYMODE) {
+      case 0:                 // Monophonic Mode
+        notes[note] = false;  // Mark note as off
+
+        validNote = -1;
+
+        switch (keyboardMode) {
+          case 0:  // Highest note priority
+            validNote = getTopNote();
+            break;
+          case 1:  // Lowest note priority
+            validNote = getBottomNote();
+            break;
+          case 2:  // Last note priority
+            validNote = getLastNote();
+            break;
+        }
+
+        if (validNote != -1 && validNote != note1) {
+          commandNote(validNote);
+        } else if (validNote == -1) {
+          digitalWrite(GATE_NOTE1, LOW);
+          digitalWrite(GATE_LED, LOW);
+          digitalWrite(TRIG_NOTE1, LOW);
+          digitalWrite(TRIG_LED, LOW);
+        }
+        break;
+
+      case 1:  // Polyphonic Unison Mode
+        // Find and remove the released note from heldNotes[]
+        for (int i = 0; i < heldCount; i++) {
+          if (heldNotes[i] == note) {
+            for (int j = i; j < heldCount - 1; j++) {
+              heldNotes[j] = heldNotes[j + 1];  // Shift remaining notes down
+            }
+            heldNotes[heldCount - 1] = 255;  // Clear the last slot
+            heldCount--;
+            break;
+          }
+        }
+
+        // If no more notes are held, turn off everything
+        if (heldCount == 0) {
+          digitalWrite(GATE_NOTE1, LOW);
+          digitalWrite(GATE_LED, HIGH);
+          for (int i = 0; i < 3; i++) {
+            voices[i].note = -1;
+            voiceOn[i] = false;
+            voices[i].keyDown = false;
+          }
+        } else {
+          // Otherwise, update voices based on remaining held notes
+          voices[0].note = heldNotes[0];  // All voices return to first held note
+          voices[1].note = (heldCount > 1) ? heldNotes[1] : heldNotes[0];
+          voices[2].note = (heldCount > 2) ? heldNotes[2] : heldNotes[0];
+        }
+        break;
+    }
+  }
+}
+
+int getVoiceNoPoly2(int note) {
+  voiceToReturn = -1;       // Initialize to 'null'
+  earliestTime = millis();  // Initialize to now
+
+  if (note == -1) {
+    // NoteOn() - Get the oldest free voice (recent voices may still be on the release stage)
+    if (voices[lastUsedVoice].note == -1) {
+      return lastUsedVoice + 1;
+    }
+
+    // If the last used voice is not free or doesn't exist, check if the first voice is free
+    if (voices[0].note == -1) {
+      return 1;
+    }
+
+    // Find the lowest available voice for the new note
+    for (int i = 0; i < NO_OF_VOICES; i++) {
+      if (voices[i].note == -1) {
+        return i + 1;
+      }
+    }
+
+    // If no voice is available, release the oldest note
+    int oldestVoice = 0;
+    for (int i = 1; i < NO_OF_VOICES; i++) {
+      if (voices[i].timeOn < voices[oldestVoice].timeOn) {
+        oldestVoice = i;
+      }
+    }
+    return oldestVoice + 1;
+  } else {
+    // NoteOff() - Get the voice number from the note
+    for (int i = 0; i < NO_OF_VOICES; i++) {
+      if (voices[i].note == note) {
+        return i + 1;
+      }
+    }
+  }
+
+  // Shouldn't get here, return voice 1
+  return 1;
+}
+
 void myMidiClock() {
-  if (!midiClockEnabled) return; // Ignore clock if disabled
+  if (!midiClockEnabled) return;  // Ignore clock if disabled
 
   midiClockCount++;
 
@@ -139,7 +317,7 @@ void myMidiClock() {
   if (midiClockCount % 24 == 0) {
     digitalWrite(LFO_SYNC, LOW);
     clockPulseActive = true;
-    lastPulseTime = millis(); // Store pulse start time
+    lastPulseTime = millis();  // Store pulse start time
 
     // Calculate BPM (every 24 clocks = 1 beat)
     uint32_t now = millis();
@@ -276,79 +454,6 @@ int getLastNote() {
   }
   return -1;
 }
-
-void myNoteOn(byte channel, byte note, byte velocity) {
-  if (channel == masterChan) {
-    if (note < 0 || note > 127) return;
-
-    // Store note state
-    if (velocity > 0) {
-      notes[note] = true;
-    } else {
-      notes[note] = false;
-    }
-
-    // **Find the correct priority note BEFORE calling commandNote()**
-    int validNote = -1;
-
-    switch (keyboardMode) {
-      case 0:  // Highest note priority
-        validNote = getTopNote();
-        break;
-
-      case 1:  // Lowest note priority
-        validNote = getBottomNote();
-        break;
-
-      case 2:  // Last note priority
-        if (velocity > 0) {
-          orderIndx = (orderIndx + 1) % 80;
-          noteOrder[orderIndx] = note;
-        }
-        validNote = getLastNote();
-        break;
-    }
-
-    // **Only trigger the gate if the note is the correct priority**
-    if (validNote == note) {
-      commandNote(validNote);
-    }
-  }
-}
-
-void myNoteOff(byte channel, byte note, byte velocity) {
-  if (channel == masterChan) {
-    notes[note] = false;  // Mark note as off
-
-    int validNote = -1;
-
-    switch (keyboardMode) {
-      case 0:  // Highest note priority
-        validNote = getTopNote();
-        break;
-
-      case 1:  // Lowest note priority
-        validNote = getBottomNote();
-        break;
-
-      case 2:  // Last note priority
-        validNote = getLastNote();
-        break;
-    }
-
-    // **Only call commandNote() if we are switching to a new note**
-    if (validNote != -1 && validNote != note1) {
-      commandNote(validNote);
-    } else if (validNote == -1) {
-      // **No notes left: Turn off Gate and Trigger**
-      digitalWrite(GATE_NOTE1, LOW);
-      digitalWrite(GATE_LED, HIGH);
-      digitalWrite(TRIG_NOTE1, LOW);
-      digitalWrite(TRIG_LED, HIGH);
-    }
-  }
-}
-
 
 void loop() {
 
@@ -533,69 +638,105 @@ void updateTimers() {
 
 // Updates the DAC with the note1 data and adds in all offsets, bend, modulation, aftertouch, octave range
 void updateVoice1() {
-  static unsigned long lastUpdateTime = 0;  // Tracks the last time this function was called
-  unsigned long currentTime = millis();     // Get the current time in milliseconds
-  unsigned long deltaTime = currentTime - lastUpdateTime;
+  switch (POLYMODE) {
+    case 0:
+      lastUpdateTime = 0;  // Tracks the last time this function was called
+      currentTime = millis();     // Get the current time in milliseconds
+      deltaTime = currentTime - lastUpdateTime;
 
-  if (portamentoActive) {
-    // Calculate the progress as a fraction of portamentoTime
-    float progress = (float)(millis() - glideStartTime) / (float)portamentoTime;
+      if (portamentoActive) {
+        // Calculate the progress as a fraction of portamentoTime
+        float progress = (float)(millis() - glideStartTime) / (float)portamentoTime;
 
-    // Clamp progress between 0.0 and 1.0
-    if (progress > 1.0) progress = 1.0;
+        // Clamp progress between 0.0 and 1.0
+        if (progress > 1.0) progress = 1.0;
 
-    // Apply an **adjusted** exponential scaling for smooth glide
-    float rate = 3.5;  // Tweak this value for a more natural feel
-    float exponentialProgress = (1.0 - exp(-rate * progress)) / (1.0 - exp(-rate));
+        // Apply an **adjusted** exponential scaling for smooth glide
+        float rate = 3.5;  // Tweak this value for a more natural feel
+        float exponentialProgress = (1.0 - exp(-rate * progress)) / (1.0 - exp(-rate));
 
-    // Interpolate currentMV values for an **exponential glide**
-    currentMV_a = initialMV_a + (targetMV_a - initialMV_a) * exponentialProgress;
-    currentMV_b = initialMV_b + (targetMV_b - initialMV_b) * exponentialProgress;
-    currentMV_c = initialMV_c + (targetMV_c - initialMV_c) * exponentialProgress;
+        // Interpolate currentMV values for an **exponential glide**
+        currentMV_a = initialMV_a + (targetMV_a - initialMV_a) * exponentialProgress;
+        currentMV_b = initialMV_b + (targetMV_b - initialMV_b) * exponentialProgress;
+        currentMV_c = initialMV_c + (targetMV_c - initialMV_c) * exponentialProgress;
 
-    // If the glide is **complete**, snap to final values and disable glide
-    if (progress >= 1.0) {
-      currentMV_a = targetMV_a;
-      currentMV_b = targetMV_b;
-      currentMV_c = targetMV_c;
-      portamentoActive = false;
-    }
+        // If the glide is **complete**, snap to final values and disable glide
+        if (progress >= 1.0) {
+          currentMV_a = targetMV_a;
+          currentMV_b = targetMV_b;
+          currentMV_c = targetMV_c;
+          portamentoActive = false;
+        }
+      }
+
+      // Now continuously apply parameters to the frequency calculation
+
+      // Calculate mV for channel_a (Oscillator A)
+      oscanote1 = note1 + OCTAVE_A;  // Apply the correct octave adjustment for this oscillator
+      additionalmV = (unsigned int)(((float)(OCTAVE_A)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
+      finalmV = (currentMV_a + additionalmV);
+      sample_data1 = (channel_a & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      // Calculate mV for channel_b (Oscillator B)
+      oscbnote1 = note1 + OCTAVE_B;  // Apply octave B adjustments
+      additionalmV = (unsigned int)(((float)(OCTAVE_B)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + DETUNE));
+      finalmV = (currentMV_b + additionalmV);
+      sample_data1 = (channel_b & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      // Calculate mV for channel_c (Oscillator C)
+      osccnote1 = note1 + OCTAVE_C;  // Apply octave C adjustments
+      additionalmV = (unsigned int)(((float)(OCTAVE_C)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + (DETUNE * 2)));
+      finalmV = (currentMV_c + additionalmV);
+      sample_data1 = (channel_c & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      sample_data1 = (channel_e & 0xFFF0000F) | (((int(map(LFORATE, 0, 127, 0, 21940))) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      sample_data1 = (channel_f & 0xFFF0000F) | (((int(map(LFOWAVE, 0, 7, 0, 21500))) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      sample_data1 = (channel_g & 0xFFF0000F) | (((int(map(LFOMULT, 0, 4, 0, 12000))) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      // Update last update time
+      lastUpdateTime = currentTime;
+      break;
+
+    case 1:
+      // Calculate mV for channel_a (Oscillator A)
+      //oscanote1 = note1 + OCTAVE_A;  // Apply the correct octave adjustment for this oscillator
+      finalmV = (unsigned int)(((float)((voices[0].note) + realoctave)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
+      //finalmV = (currentMV_a + additionalmV);
+      sample_data1 = (channel_a & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      // Calculate mV for channel_b (Oscillator B)
+      //oscbnote1 = note1 + OCTAVE_B;  // Apply octave B adjustments
+      finalmV = (unsigned int)(((float)((voices[1].note) + realoctave)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
+      //finalmV = (currentMV_b + additionalmV);
+      sample_data1 = (channel_b & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      // Calculate mV for channel_c (Oscillator C)
+      //osccnote1 = note1 + OCTAVE_C;  // Apply octave C adjustments
+      finalmV = (unsigned int)(((float)((voices[2].note) + realoctave)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
+      //finalmV = (currentMV_c + additionalmV);
+      sample_data1 = (channel_c & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      sample_data1 = (channel_e & 0xFFF0000F) | (((int(map(LFORATE, 0, 127, 0, 21940))) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      sample_data1 = (channel_f & 0xFFF0000F) | (((int(map(LFOWAVE, 0, 7, 0, 21500))) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+
+      sample_data1 = (channel_g & 0xFFF0000F) | (((int(map(LFOMULT, 0, 4, 0, 12000))) & 0xFFFF) << 4);
+      outputDAC(DAC_NOTE1, sample_data1);
+      break;
   }
-
-  // Now continuously apply parameters to the frequency calculation
-
-  // Calculate mV for channel_a (Oscillator A)
-  oscanote1 = note1 + OCTAVE_A;  // Apply the correct octave adjustment for this oscillator
-  additionalmV = (unsigned int)(((float)(OCTAVE_A)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
-  finalmV = (currentMV_a + additionalmV);
-  sample_data1 = (channel_a & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  // Calculate mV for channel_b (Oscillator B)
-  oscbnote1 = note1 + OCTAVE_B;  // Apply octave B adjustments
-  additionalmV = (unsigned int)(((float)(OCTAVE_B)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + DETUNE));
-  finalmV = (currentMV_b + additionalmV);
-  sample_data1 = (channel_b & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  // Calculate mV for channel_c (Oscillator C)
-  osccnote1 = note1 + OCTAVE_C;  // Apply octave C adjustments
-  additionalmV = (unsigned int)(((float)(OCTAVE_C)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + (DETUNE * 2)));
-  finalmV = (currentMV_c + additionalmV);
-  sample_data1 = (channel_c & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  sample_data1 = (channel_e & 0xFFF0000F) | (((int(map(LFORATE, 0, 127, 0, 21940))) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  sample_data1 = (channel_f & 0xFFF0000F) | (((int(map(LFOWAVE, 0, 7, 0, 21500))) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  sample_data1 = (channel_g & 0xFFF0000F) | (((int(map(LFOMULT, 0, 4, 0, 12000))) & 0xFFFF) << 4);
-  outputDAC(DAC_NOTE1, sample_data1);
-
-  // Update last update time
-  lastUpdateTime = currentTime;
 }
 
 // Resets all the notes to off
@@ -708,7 +849,7 @@ void loadSettingsFromSD() {
         else if (key == "portamentoTimestr") portamentoTimestr = value;
         else if (key == "FM_MOD_WHEEL_STR") FM_MOD_WHEEL_STR = value;
         else if (key == "FM_AT_WHEEL_STR") FM_AT_WHEEL_STR = value;
-        else if (key == "midiClockEnabled") midiClockEnabled = (value == 1); // Restore setting
+        else if (key == "midiClockEnabled") midiClockEnabled = (value == 1);  // Restore setting
       }
     }
     file.close();

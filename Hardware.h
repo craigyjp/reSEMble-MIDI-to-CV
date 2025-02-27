@@ -9,7 +9,7 @@
 #define FORMAT_LITTLEFS_IF_FAILED true
 
 // Voices available
-#define NO_OF_VOICES 1
+#define NO_OF_VOICES 3
 #define trigTimeout 30
 
 #define FM_INPUT 26  // ADC0
