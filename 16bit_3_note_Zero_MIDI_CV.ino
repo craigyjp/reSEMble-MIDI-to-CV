@@ -753,8 +753,12 @@ void allNotesOff() {
   digitalWrite(GATE_LED, HIGH);
 
   voices[0].note = -1;
+  voices[1].note = -1;
+  voices[2].note = -1;
 
   voiceOn[0] = false;
+  voiceOn[1] = false;
+  voiceOn[2] = false;
 }
 
 void lfoalt_task() {
