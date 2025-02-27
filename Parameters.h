@@ -4,6 +4,7 @@ enum MenuState {
   MENU_LFOWAVE,
   MENU_LFOMULT,
   MENU_LFOALT,
+  MENU_MIDICLOCK,
   MENU_BEND_WHEEL,
   MENU_FM_MOD_WHEEL,
   MENU_FM_AT_WHEEL,
@@ -87,6 +88,15 @@ int LFOWAVE = 0;
 int LFOMULT = 0;
 bool LFOALT = false;  // Off/On
 int lfoalt_old = 99;
+
+bool midiClockEnabled = false;  // Default: MIDI Clock OFF
+volatile uint32_t midiClockCount = 0;
+volatile uint32_t lastClockMillis = 0;
+volatile uint16_t bpm = 120; // Default BPM
+volatile bool clockPulseActive = false;
+volatile uint32_t lastPulseTime = 0;
+const uint8_t pulseDuration = 30;  // Short pulse time in milliseconds
+
 
 int masterChan = 1;
 int masterTran;

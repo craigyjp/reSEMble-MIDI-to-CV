@@ -18,6 +18,9 @@
 #define DAC_NOTE1 5
 
 //Switch LFO Wave
+#define LFO_SYNC 6
+
+//Switch LFO Wave
 #define LFO_ALT 7
 
 //Switch Up
@@ -62,6 +65,9 @@ void setupHardware() {
 
   pinMode(LFO_ALT, OUTPUT);
   digitalWrite(LFO_ALT, HIGH);
+
+  pinMode(LFO_SYNC, OUTPUT);
+  digitalWrite(LFO_SYNC, HIGH);
 
   SPI.beginTransaction(SPISettings(40000000, MSBFIRST, SPI_MODE1));
   digitalWrite(DAC_NOTE1, LOW);

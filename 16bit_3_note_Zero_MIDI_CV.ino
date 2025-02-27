@@ -116,6 +116,7 @@ void setup() {
   MIDI.setHandlePitchBend(myPitchBend);
   MIDI.setHandleControlChange(myControlChange);
   MIDI.setHandleAfterTouchChannel(myAfterTouch);
+  MIDI.setHandleClock(myMidiClock);
   Serial.println("MIDI In DIN Listening");
 
   pixels.begin();
@@ -127,6 +128,24 @@ void setup() {
 
   lastMenuInteraction = millis();
   settingsSaved = true;
+}
+
+void myMidiClock() {
+  if (!midiClockEnabled) return; // Ignore clock if disabled
+
+  midiClockCount++;
+
+  // Trigger LFO_SYNC only on every 24th MIDI clock tick (1 beat)
+  if (midiClockCount % 24 == 0) {
+    digitalWrite(LFO_SYNC, LOW);
+    clockPulseActive = true;
+    lastPulseTime = millis(); // Store pulse start time
+
+    // Calculate BPM (every 24 clocks = 1 beat)
+    uint32_t now = millis();
+    bpm = 60000 / (now - lastClockMillis);
+    lastClockMillis = now;
+  }
 }
 
 void commandTopNote() {
@@ -282,8 +301,8 @@ void myNoteOn(byte channel, byte note, byte velocity) {
         break;
 
       case 2:  // Last note priority
-        if (velocity > 0) {  
-          orderIndx = (orderIndx + 1) % 80;  
+        if (velocity > 0) {
+          orderIndx = (orderIndx + 1) % 80;
           noteOrder[orderIndx] = note;
         }
         validNote = getLastNote();
@@ -299,20 +318,20 @@ void myNoteOn(byte channel, byte note, byte velocity) {
 
 void myNoteOff(byte channel, byte note, byte velocity) {
   if (channel == masterChan) {
-    notes[note] = false; // Mark note as off
+    notes[note] = false;  // Mark note as off
 
     int validNote = -1;
 
     switch (keyboardMode) {
-      case 0: // Highest note priority
+      case 0:  // Highest note priority
         validNote = getTopNote();
         break;
 
-      case 1: // Lowest note priority
+      case 1:  // Lowest note priority
         validNote = getBottomNote();
         break;
 
-      case 2: // Last note priority
+      case 2:  // Last note priority
         validNote = getLastNote();
         break;
     }
@@ -332,6 +351,12 @@ void myNoteOff(byte channel, byte note, byte velocity) {
 
 
 void loop() {
+
+  if (clockPulseActive && (millis() - lastPulseTime >= pulseDuration)) {
+    digitalWrite(LFO_SYNC, HIGH);
+    clockPulseActive = false;
+  }
+
   updateMenu();
 
   // Display "Saved" message if triggered
@@ -644,6 +669,8 @@ void saveSettingsToSD() {
     file.println(FM_MOD_WHEEL_STR);
     file.print("FM_AT_WHEEL_STR,");
     file.println(FM_AT_WHEEL_STR);
+    file.print("midiClockEnabled,");
+    file.println(midiClockEnabled ? 1 : 0);
     file.close();
     Serial.println("Settings saved to LittleFS.");
     // Trigger the "Settings Saved" message
@@ -681,6 +708,7 @@ void loadSettingsFromSD() {
         else if (key == "portamentoTimestr") portamentoTimestr = value;
         else if (key == "FM_MOD_WHEEL_STR") FM_MOD_WHEEL_STR = value;
         else if (key == "FM_AT_WHEEL_STR") FM_AT_WHEEL_STR = value;
+        else if (key == "midiClockEnabled") midiClockEnabled = (value == 1); // Restore setting
       }
     }
     file.close();
@@ -689,6 +717,7 @@ void loadSettingsFromSD() {
     Serial.println("Failed to open settings.txt on LittleFS.");
   }
 }
+
 
 void updateMenu() {
   static bool lastUpState = HIGH, lastDownState = HIGH, lastSelectState = HIGH;
@@ -786,6 +815,9 @@ void incrementMenuValue(int delta) {
       break;
     case MENU_LFOALT:
       LFOALT = !LFOALT;
+      break;
+    case MENU_MIDICLOCK:
+      midiClockEnabled = !midiClockEnabled;  // Toggle ON/OFF
       break;
     case MENU_BEND_WHEEL:
       BEND_WHEEL = constrain(BEND_WHEEL + delta, 0, 12);
@@ -936,6 +968,10 @@ void displayMenu() {
       case MENU_LFOALT:
         display.print("LFO Alt:  ");
         display.println(LFOALT ? "On" : "Off");
+        break;
+      case MENU_MIDICLOCK:
+        display.print("MIDI Clock: ");
+        display.println(midiClockEnabled ? "On" : "Off");
         break;
       case MENU_BEND_WHEEL:
         display.print("Bend Depth: ");
