@@ -11,7 +11,15 @@ This is a voltage controlled LFO capable of 16 waveforms and and is merged into 
 
 The interface also responds to pitch bend and the range can be set from 0-12 semitones.
 
+Aftertouch depth of the LFO to the FM
+
+Mod Wheel depth of the LFO to the FM.
+
 Gate and trigger outputs are +5V
+
+LFO MIDI Sync option.
+
+Top, Bottom, Last note priority in mono mode.
 
 Digital glide is also included in mono mode.
 
