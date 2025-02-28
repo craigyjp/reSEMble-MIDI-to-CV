@@ -5,7 +5,7 @@
 
        Filesystem 1.5Mb/0.5Mb
 
-      Version 1.4
+      Version 1.6
 
       Copyright (C) 2020 Craig Barnes
 
@@ -136,6 +136,11 @@ void myNoteOn(byte channel, byte note, byte velocity) {
   if (channel == masterChan) {
     if (note > 127) return;  // Remove unnecessary note < 0 check
 
+    if (!lfoDelayActive || lfoDelayRetrigger) {
+      lfoDelayStartTime = millis();
+      lfoDelayActive = true;
+    }
+
     switch (POLYMODE) {
       case 0:  // Monophonic Mode
         if (velocity > 0) {
@@ -226,9 +231,9 @@ void myNoteOff(byte channel, byte note, byte velocity) {
           commandNote(validNote);
         } else if (validNote == -1) {
           digitalWrite(GATE_NOTE1, LOW);
-          digitalWrite(GATE_LED, LOW);
+          digitalWrite(GATE_LED, HIGH);
           digitalWrite(TRIG_NOTE1, LOW);
-          digitalWrite(TRIG_LED, LOW);
+          digitalWrite(TRIG_LED, HIGH);
         }
         break;
 
@@ -550,12 +555,13 @@ void myPitchBend(byte channel, int bend) {
 
 // Reads MIDI CC messages
 void myControlChange(byte channel, byte number, byte value) {
+  currentMillis = millis();
   if (channel == masterChan) {
     switch (number) {
 
       case 1:
         FM_RANGE_UPPER = int(value * FM_MOD_WHEEL);
-        FM_RANGE_LOWER = (FM_RANGE_UPPER - FM_RANGE_UPPER - FM_RANGE_UPPER);
+        FM_RANGE_LOWER = -FM_RANGE_UPPER;
         break;
 
       case 5:  // Portamento time
@@ -575,6 +581,13 @@ void myControlChange(byte channel, byte number, byte value) {
         FM_MOD_WHEEL = map(value, 0, 127, 0, 16.2);
         break;
 
+      case 18:
+        FM_ACTUAL_STR = value;
+        FM_ACTUAL = map(FM_ACTUAL_STR, 0, 127, 0, 16.2);
+        FM_ACTUAL_UPPER = FM_ACTUAL * FM_ACTUAL_STR;
+        FM_ACTUAL_LOWER = -FM_ACTUAL_UPPER;
+        break;
+
       case 19:
         FM_AT_WHEEL = map(value, 0, 127, 0, 16.2);
         break;
@@ -585,7 +598,7 @@ void myControlChange(byte channel, byte number, byte value) {
 
       case 21:
         LFOWAVE = map(value, 0, 127, 0, 7);
-        break; 
+        break;
 
       case 22:
         LFOMULT = map(value, 0, 127, 0, 4);
@@ -593,6 +606,15 @@ void myControlChange(byte channel, byte number, byte value) {
 
       case 23:
         LFOALT = map(value, 0, 127, 0, 1);
+        break;
+
+      case 24:
+        LFODELAY = value;
+        lfoDelayDuration = map(LFODELAY, 0, 127, 0, 5000);  // Map to 0 - 5000ms
+        break;
+
+      case 25:
+        lfoDelayRetrigger = map(value, 0, 127, 0, 1);
         break;
 
       case 65:  // Portamento on/off
@@ -625,22 +647,34 @@ void myControlChange(byte channel, byte number, byte value) {
         }
         break;
     }
+    lastMenuInteraction = currentMillis;
+    settingsSaved = false;
   }
 }
 
 void myAfterTouch(byte channel, byte value) {
   if (channel == masterChan) {
     FM_AT_RANGE_UPPER = int(value * FM_AT_WHEEL);
-    FM_AT_RANGE_LOWER = (FM_AT_RANGE_UPPER - FM_AT_RANGE_UPPER - FM_AT_RANGE_UPPER);
+    FM_AT_RANGE_LOWER = -FM_AT_RANGE_UPPER;
   }
 }
 
-// Get the LFO input on the FM_INPUT
 void mod_task() {
-
   MOD_VALUE = analogRead(FM_INPUT);
   FM_VALUE = map(MOD_VALUE, 0, 4095, FM_RANGE_LOWER, FM_RANGE_UPPER);
   FM_AT_VALUE = map(MOD_VALUE, 0, 4095, FM_AT_RANGE_LOWER, FM_AT_RANGE_UPPER);
+  uint32_t elapsedTime = millis() - lfoDelayStartTime;
+
+  if (!lfoDelayActive) {
+    FM_ACTUAL_VALUE = map(MOD_VALUE, 0, 4095, FM_ACTUAL_LOWER, FM_ACTUAL_UPPER);
+  } else {
+    if (elapsedTime < lfoDelayDuration) {
+      FM_ACTUAL_VALUE = 0;  // Keep LFO off during delay
+    } else {
+      FM_ACTUAL_VALUE = map(MOD_VALUE, 0, 4095, FM_ACTUAL_LOWER, FM_ACTUAL_UPPER);  // LFO fully on
+      lfoDelayActive = false;  // End delay tracking
+    }
+  }
 }
 
 // Kills the trigger after 20 mS
@@ -656,8 +690,8 @@ void updateTimers() {
 void updateVoice1() {
   switch (POLYMODE) {
     case 0:
-      lastUpdateTime = 0;  // Tracks the last time this function was called
-      currentTime = millis();     // Get the current time in milliseconds
+      lastUpdateTime = 0;      // Tracks the last time this function was called
+      currentTime = millis();  // Get the current time in milliseconds
       deltaTime = currentTime - lastUpdateTime;
 
       if (portamentoActive) {
@@ -689,21 +723,21 @@ void updateVoice1() {
 
       // Calculate mV for channel_a (Oscillator A)
       oscanote1 = note1 + OCTAVE_A;  // Apply the correct octave adjustment for this oscillator
-      additionalmV = (unsigned int)(((float)(OCTAVE_A)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
+      additionalmV = (unsigned int)(((float)(OCTAVE_A)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + FM_ACTUAL_VALUE));
       finalmV = (currentMV_a + additionalmV);
       sample_data1 = (channel_a & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
       outputDAC(DAC_NOTE1, sample_data1);
 
       // Calculate mV for channel_b (Oscillator B)
       oscbnote1 = note1 + OCTAVE_B;  // Apply octave B adjustments
-      additionalmV = (unsigned int)(((float)(OCTAVE_B)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + DETUNE));
+      additionalmV = (unsigned int)(((float)(OCTAVE_B)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + FM_ACTUAL_VALUE + DETUNE));
       finalmV = (currentMV_b + additionalmV);
       sample_data1 = (channel_b & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
       outputDAC(DAC_NOTE1, sample_data1);
 
       // Calculate mV for channel_c (Oscillator C)
       osccnote1 = note1 + OCTAVE_C;  // Apply octave C adjustments
-      additionalmV = (unsigned int)(((float)(OCTAVE_C)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + (DETUNE * 2)));
+      additionalmV = (unsigned int)(((float)(OCTAVE_C)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + FM_ACTUAL_VALUE + (DETUNE * 2)));
       finalmV = (currentMV_c + additionalmV);
       sample_data1 = (channel_c & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
       outputDAC(DAC_NOTE1, sample_data1);
@@ -723,15 +757,15 @@ void updateVoice1() {
 
     case 1:
 
-      finalmV = (unsigned int)(((float)((voices[0].note) + realoctave)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
+      finalmV = (unsigned int)(((float)((voices[0].note) + realoctave) * NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + FM_ACTUAL_VALUE));
       sample_data1 = (channel_a & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
       outputDAC(DAC_NOTE1, sample_data1);
 
-      finalmV = (unsigned int)(((float)((voices[1].note) + realoctave)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
+      finalmV = (unsigned int)(((float)((voices[1].note) + realoctave) * NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + FM_ACTUAL_VALUE));
       sample_data1 = (channel_b & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
       outputDAC(DAC_NOTE1, sample_data1);
 
-      finalmV = (unsigned int)(((float)((voices[2].note) + realoctave)*NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE));
+      finalmV = (unsigned int)(((float)((voices[2].note) + realoctave) * NOTE_SF + 0.5) + (VOLTOFFSET + bend_data + FM_VALUE + FM_AT_VALUE + FM_ACTUAL_VALUE));
       sample_data1 = (channel_c & 0xFFF0000F) | (((int(finalmV)) & 0xFFFF) << 4);
       outputDAC(DAC_NOTE1, sample_data1);
 
@@ -778,7 +812,7 @@ void outputDAC(int CHIP_SELECT, uint32_t sample_data) {
   delayMicroseconds(1);
   SPI.transfer16(sample_data >> 16);
   SPI.transfer16(sample_data);
-  delayMicroseconds(3);  // Settling time delay
+  delayMicroseconds(1);  // Settling time delay
   digitalWrite(CHIP_SELECT, HIGH);
   SPI.endTransaction();
 }
@@ -824,6 +858,14 @@ void saveSettingsToSD() {
     file.println(FM_AT_WHEEL_STR);
     file.print("midiClockEnabled,");
     file.println(midiClockEnabled ? 1 : 0);
+    file.print("FM_ACTUAL_STR,");
+    file.println(FM_ACTUAL_STR);
+    file.print("FM_ACTUAL,");
+    file.println(FM_ACTUAL);
+    file.print("LFODELAY,");
+    file.println(LFODELAY);
+    file.print("lfoDelayRetrigger,");
+    file.println(lfoDelayRetrigger ? 1 : 0);
     file.close();
     Serial.println("Settings saved to LittleFS.");
     // Trigger the "Settings Saved" message
@@ -862,6 +904,10 @@ void loadSettingsFromSD() {
         else if (key == "FM_MOD_WHEEL_STR") FM_MOD_WHEEL_STR = value;
         else if (key == "FM_AT_WHEEL_STR") FM_AT_WHEEL_STR = value;
         else if (key == "midiClockEnabled") midiClockEnabled = (value == 1);  // Restore setting
+        else if (key == "FM_ACTUAL_STR") FM_ACTUAL_STR = value;
+        else if (key == "FM_ACTUAL") FM_ACTUAL = value;
+        else if (key == "LFODELAY") LFODELAY = value;
+        else if (key == "lfoDelayRetrigger") lfoDelayRetrigger = (value == 1);  // Restore setting
       }
     }
     file.close();
@@ -869,6 +915,9 @@ void loadSettingsFromSD() {
   } else {
     Serial.println("Failed to open settings.txt on LittleFS.");
   }
+  FM_ACTUAL_UPPER = FM_ACTUAL * FM_ACTUAL_STR;
+  FM_ACTUAL_LOWER = -FM_ACTUAL_UPPER;
+  lfoDelayDuration = map(LFODELAY, 0, 127, 0, 5000);
 }
 
 
@@ -883,7 +932,7 @@ void updateMenu() {
   bool downState = digitalRead(SWITCH_DOWN);
   bool selectState = digitalRead(SWITCH_SELECT);
 
-  unsigned long currentMillis = millis();
+  currentMillis = millis();
 
   // --- UP button logic ---
   if (upState == LOW && lastUpState == HIGH) {
@@ -969,6 +1018,13 @@ void incrementMenuValue(int delta) {
     case MENU_LFOALT:
       LFOALT = !LFOALT;
       break;
+    case MENU_LFODELAY:
+      LFODELAY = constrain(LFODELAY + delta, 0, 127);
+      lfoDelayDuration = map(LFODELAY, 0, 127, 0, 5000);  // Map to 0 - 5000ms
+      break;
+    case MENU_LFODELAY_RETRIGGER:
+      lfoDelayRetrigger = !lfoDelayRetrigger;  // Toggle ON/OFF
+      break;
     case MENU_MIDICLOCK:
       midiClockEnabled = !midiClockEnabled;  // Toggle ON/OFF
       break;
@@ -982,6 +1038,13 @@ void incrementMenuValue(int delta) {
     case MENU_FM_AT_WHEEL:
       FM_AT_WHEEL_STR = constrain(FM_AT_WHEEL_STR + delta, 0, 127);
       FM_AT_WHEEL = map(FM_AT_WHEEL_STR, 0, 127, 0, 16.2);
+      break;
+    case MENU_FM_ACTUAL:
+      FM_ACTUAL_STR = constrain(FM_ACTUAL_STR + delta, 0, 127);
+      FM_ACTUAL = map(FM_ACTUAL_STR, 0, 127, 0, 16.2);
+
+      FM_ACTUAL_UPPER = FM_ACTUAL * FM_ACTUAL_STR;
+      FM_ACTUAL_LOWER = -FM_ACTUAL_UPPER;
       break;
     case MENU_DETUNE:
       DETUNE = constrain(DETUNE + delta, 0, 127);
@@ -1122,6 +1185,14 @@ void displayMenu() {
         display.print("LFO Alt:  ");
         display.println(LFOALT ? "On" : "Off");
         break;
+      case MENU_LFODELAY:
+        display.print("LFO Delay: ");
+        display.println(LFODELAY);
+        break;
+      case MENU_LFODELAY_RETRIGGER:
+        display.print("Retrigger:  ");
+        display.println(lfoDelayRetrigger ? "On" : "Off");
+        break;
       case MENU_MIDICLOCK:
         display.print("MIDI Clock: ");
         display.println(midiClockEnabled ? "On" : "Off");
@@ -1131,12 +1202,19 @@ void displayMenu() {
         display.println(BEND_WHEEL);
         break;
       case MENU_FM_MOD_WHEEL:
-        display.print("FM Depth:   ");
-        display.println(FM_MOD_WHEEL_STR);
+        display.print("MW Depth:   ");
+        printFloatWithoutTrailingZeros(FM_MOD_WHEEL_STR);
+        //display.println(FM_MOD_WHEEL_STR);
         break;
       case MENU_FM_AT_WHEEL:
         display.print("AT Depth:   ");
-        display.println(FM_AT_WHEEL_STR);
+        printFloatWithoutTrailingZeros(FM_AT_WHEEL_STR);
+        //display.println(FM_AT_WHEEL_STR);
+        break;
+      case MENU_FM_ACTUAL:
+        display.print("FM Depth:   ");
+        printFloatWithoutTrailingZeros(FM_ACTUAL_STR);
+        //display.println(FM_ACTUAL_STR);
         break;
       case MENU_DETUNE:
         display.print("Detune:     ");
@@ -1181,6 +1259,14 @@ void displayMenu() {
   display.display();
 }
 
+void printFloatWithoutTrailingZeros(float value) {
+  if (value == (int)value) {
+    display.println((int)value);  // Print as integer if no decimals needed
+  } else {
+    display.println(value, 2);  // Otherwise, print with 2 decimal places
+  }
+}
+
 void displaySaveMessage() {
   display.clearDisplay();
   display.setTextSize(2);
@@ -1194,9 +1280,3 @@ void displaySaveMessage() {
 int mod(int x, int m) {
   return (x % m + m) % m;  // Ensures positive modulo result
 }
-
-
-// int mod(int a, int b) {
-//   int r = a % b;
-//   return r < 0 ? r + b : r;
-// }

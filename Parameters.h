@@ -4,10 +4,13 @@ enum MenuState {
   MENU_LFOWAVE,
   MENU_LFOMULT,
   MENU_LFOALT,
+  MENU_LFODELAY,
+  MENU_LFODELAY_RETRIGGER,
   MENU_MIDICLOCK,
   MENU_BEND_WHEEL,
   MENU_FM_MOD_WHEEL,
   MENU_FM_AT_WHEEL,
+  MENU_FM_ACTUAL,
   MENU_DETUNE,
   MENU_GLIDE_SW,
   MENU_GLIDE_TIME,
@@ -67,10 +70,16 @@ float FM_VALUE = 0.0f;
 float FM_AT_VALUE = 0.0f;
 float MOD_VALUE = 0.0f;
 
+float FM_ACTUAL = 0.0f;
+float FM_ACTUAL_VALUE = 0.0f;
+float FM_ACTUAL_STR = 0.0f;
+
 int FM_RANGE_UPPER = 0;
 int FM_RANGE_LOWER = 0;
 int FM_AT_RANGE_UPPER = 0;
 int FM_AT_RANGE_LOWER = 0;
+int FM_ACTUAL_LOWER = 0;
+int FM_ACTUAL_UPPER = 0;
 
 float FM_MOD_WHEEL = 0.00f;
 float FM_MOD_WHEEL_STR = 0.00f;
@@ -87,8 +96,14 @@ int INTERVAL = 0;
 int LFORATE = 0;
 int LFOWAVE = 0;
 int LFOMULT = 0;
+int LFODELAY = 0;
 bool LFOALT = false;  // Off/On
 int lfoalt_old = 99;
+
+uint32_t lfoDelayStartTime = 0;   // Timestamp when delay starts
+bool lfoDelayActive = false;      // Tracks if the delay is in progress
+bool lfoDelayRetrigger = false;   // Whether to retrigger on new note
+float lfoDelayDuration = 0;       // Time for delay in milliseconds
 
 bool midiClockEnabled = false;  // Default: MIDI Clock OFF
 volatile uint32_t midiClockCount = 0;
@@ -104,6 +119,7 @@ byte heldCount = 0;                  // Number of currently held notes
 static unsigned long lastUpdateTime = 0;  // Tracks the last time this function was called
 unsigned long currentTime = millis();     // Get the current time in milliseconds
 unsigned long deltaTime = currentTime - lastUpdateTime;
+unsigned long currentMillis = millis();
 
 int masterChan = 1;
 int masterTran;
