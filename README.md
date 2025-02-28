@@ -15,6 +15,8 @@ Aftertouch depth of the LFO to the FM
 
 Mod Wheel depth of the LFO to the FM.
 
+Direct FM depth of the CV with Delay and Retrigger.
+
 Gate and trigger outputs are +5V
 
 LFO MIDI Sync option.
