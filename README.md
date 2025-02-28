@@ -37,6 +37,8 @@ CC16 Bendwheel Range 0-127,  0-12 semitones
 
 CC17 Modwheel Depth FM 0-127
 
+CC18 FM Depth direct (with delay) 0-127
+
 CC19 AT Depth FM 0-127
 
 CC20 LFO Rate 0-127
@@ -46,6 +48,10 @@ CC21 LFO Wave 0-127 (waveform 1-8)
 CC22 LFO Multiplier 0-127 (0.5 to 3.0)
 
 CC23 LFO alternative waves 0-127, original/alternative
+
+CC24 LFO Delay 0-127 (0 to 5 Seconds)
+
+CC25 LFO Delay retrigger 0-127, (Off/On)
 
 CC65 Portamento Off/On 0-127, 0=Off, 127=On 
 
