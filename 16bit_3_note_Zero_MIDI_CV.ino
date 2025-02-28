@@ -198,10 +198,11 @@ void myNoteOn(byte channel, byte note, byte velocity) {
         }
 
         // Trigger gate and trigger signals
-        digitalWrite(GATE_NOTE1, HIGH);
-        digitalWrite(GATE_LED, LOW);
         digitalWrite(TRIG_NOTE1, HIGH);
         digitalWrite(TRIG_LED, LOW);
+        digitalWrite(GATE_NOTE1, HIGH);
+        digitalWrite(GATE_LED, LOW);
+        noteTrig = millis();
         break;
     }
   }
