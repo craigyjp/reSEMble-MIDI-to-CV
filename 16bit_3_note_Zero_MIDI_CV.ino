@@ -255,7 +255,7 @@ void myNoteOff(byte channel, byte note, byte velocity) {
           digitalWrite(GATE_NOTE1, LOW);
           digitalWrite(GATE_LED, HIGH);
           for (int i = 0; i < 3; i++) {
-            voices[i].note = -1;
+            //voices[i].note = -1;
             voiceOn[i] = false;
             voices[i].keyDown = false;
           }
